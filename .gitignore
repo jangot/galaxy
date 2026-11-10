@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.DS_Store
+*.log
+
+# Version project skills and shared settings despite a global .claude ignore
+!.claude
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
