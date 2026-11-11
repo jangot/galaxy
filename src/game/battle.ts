@@ -61,7 +61,9 @@ export class Battle {
    */
   update(dt: number, intent: PlayerIntent): void {
     this.player.update(dt, intent);
-    // No target while the ship is down: strikers fly straight down, drones starting a descend keep no aim.
+    // No target while the ship is down: strikers shed their lateral speed within
+    // STRIKER_TURN_TICKS ticks and then fly straight down; drones stop steering until a
+    // re-aim tick finds the ship again.
     const { ship } = this.player;
     const targetX = this.player.canBeTargeted ? ship.x + Math.floor(SHIP_WIDTH / 2) : null;
     this.currentWave.update(dt, targetX);

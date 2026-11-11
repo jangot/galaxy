@@ -108,15 +108,22 @@ describe('Wave dives', () => {
 
   it('passes targetX to the enemies', () => {
     const P = PEEL_SEGMENTS.reduce((sum, s) => sum + s.ticks, 0);
-    const wave = new Wave(passiveLevel(['S'], { firstDiveDelayTicks: 1 }), createRng(1));
-    for (let i = 0; i < 1 + P; i++) wave.update(TICK_SECONDS, 0);
-    const enemy = wave.enemies[0]!;
-    expect(enemy.state).toBe('diving');
-    const x = enemy.x;
-    wave.update(TICK_SECONDS, 0);
-    expect(enemy.x).toBe(x - 1);
-    wave.update(TICK_SECONDS, null);
-    expect(enemy.x).toBe(x - 1);
+    const level = passiveLevel(['D'], { firstDiveDelayTicks: 1 });
+    const aimed = new Wave(level, createRng(1));
+    const blind = new Wave(level, createRng(1));
+    for (let i = 0; i < 1 + P; i++) {
+      aimed.update(TICK_SECONDS, 0);
+      blind.update(TICK_SECONDS, 0);
+    }
+    const a = aimed.enemies[0]!;
+    const b = blind.enemies[0]!;
+    expect(a.state).toBe('diving');
+    expect(b.x).toBe(a.x);
+    const x = a.x;
+    aimed.update(TICK_SECONDS, 0); // descend tick 1: aims at 0
+    blind.update(TICK_SECONDS, null); // descend tick 1: no target, straight down
+    expect(a.x).toBe(x - 1);
+    expect(b.x).toBe(x);
   });
 
   it('is deterministic for a seed, including dives and returns', () => {

@@ -4,20 +4,41 @@ import type { Formation } from './formation';
 import type { EnemyKind, Slot } from './levels';
 import { SHIP_Y } from './ship';
 import type { Sprite } from './sprite';
+import type { SteerSpec } from './steering';
+import { desiredVx, isRetargetTick, turn } from './steering';
 
-/** How a diver picks its X target in 'descend'. fixed: once, on the first tick; track: every tick. */
-export type Aim = 'fixed' | 'track';
-
-/** Per-kind data. */
+/** Per-kind data. steer: lateral steering in 'descend' (see steering.ts). */
 export interface EnemyKindSpec {
   readonly sprite: Sprite;
-  readonly aim: Aim;
+  readonly steer: SteerSpec;
 }
 
+/**
+ * Drone re-aim period in 'descend', ticks (0.5 s): it takes the ship's center anew on
+ * descend ticks 1, 1 + N, 1 + 2N, ... Approved by the owner (feature 003, Q1).
+ */
+export const DRONE_RETARGET_TICKS = 30;
+
+/**
+ * Striker inertia in 'descend', ticks per 1 px/tick change of vx: a reversal takes
+ * T - 1 ticks on the old course, T ticks with vx = 0, then the new course. Approved by the
+ * owner (feature 003, Q2).
+ */
+export const STRIKER_TURN_TICKS = 8;
+
 export const ENEMY_KINDS: Readonly<Record<EnemyKind, EnemyKindSpec>> = {
-  drone: { sprite: DRONE_SPRITE, aim: 'fixed' },
-  striker: { sprite: STRIKER_SPRITE, aim: 'track' },
-  raider: { sprite: RAIDER_SPRITE, aim: 'fixed' },
+  // Re-aims every DRONE_RETARGET_TICKS ticks and turns at once (no inertia, no zigzag).
+  drone: {
+    sprite: DRONE_SPRITE,
+    steer: { retargetTicks: DRONE_RETARGET_TICKS, turnTicks: 0, maxVx: 1 },
+  },
+  // Re-aims every tick, turns with inertia: overshoots a reversing ship, can be shaken off by a feint.
+  striker: {
+    sprite: STRIKER_SPRITE,
+    steer: { retargetTicks: 1, turnTicks: STRIKER_TURN_TICKS, maxVx: 1 },
+  },
+  // Aims once, on the first descend tick (group anchor + aimOffsetX).
+  raider: { sprite: RAIDER_SPRITE, steer: { retargetTicks: null, turnTicks: 0, maxVx: 1 } },
 };
 
 /** Visual, starting values (owner approves the look). One explosion frame lasts this many ticks. */
@@ -29,8 +50,8 @@ export const EXPLOSION_TICKS = EXPLOSION_FRAMES.length * EXPLOSION_FRAME_TICKS;
 export type EnemyState = 'formation' | 'diving' | 'returning' | 'exploding' | 'dead';
 
 /**
- * Horizontal steering speed, px/s (1 px/tick): the X step of 'descend' aiming and of 'returning'.
- * Slower than the ship (SHIP_SPEED), so a tracker can be dodged.
+ * Horizontal speed of 'returning', px/s (1 px/tick). 'descend' steers by
+ * ENEMY_KINDS[kind].steer.maxVx (px/tick) instead.
  */
 export const STEER_SPEED = 60;
 /** Downward speed of 'returning', px/s (1 px/tick). */
@@ -55,6 +76,8 @@ export const PEEL_SEGMENTS: readonly PeelSegment[] = [
 ];
 /** Peel length, ticks (14). */
 const PEEL_TICKS = PEEL_SEGMENTS.reduce((sum, s) => sum + s.ticks, 0);
+/** vx of the last peel leg (side = +1): 'descend' starts by continuing it. */
+const LAST_PEEL_VX = PEEL_SEGMENTS[PEEL_SEGMENTS.length - 1]!.vx;
 
 /** Ticks between two shots of one diver (owner decision В2). */
 export const ENEMY_FIRE_INTERVAL_TICKS = 20;
@@ -95,8 +118,8 @@ export interface EnemyEnv {
  * in 'exploding' x/y stay where the enemy was hit; 'dead' is not updated at all.
  * In flight x stays fractional: it starts from the swaying slot and moves by whole px
  * (ADR 002/003).
- * In 'descend' the enemy steers on X towards its aim (see ENEMY_KINDS[kind].aim);
- * fixed: anchor + aimOffsetX, taken on tick PEEL_TICKS + 1 (see fixedAim()).
+ * In 'descend' the enemy steers on X by its kind's profile (ENEMY_KINDS[kind].steer, see
+ * steering.ts): aim = anchor + aimOffsetX (aimFor()), lateral speed vx in whole px per tick.
  * In 'descend' it also fires by the order's shots (see fires()); update() returns true then.
  */
 export class Enemy {
@@ -109,12 +132,13 @@ export class Enemy {
   private ticksInState = 0;
   private currentSortieId = 0;
   private side: -1 | 1 = 1;
-  private readonly aim: Aim;
-  /**
-   * 'fixed' only: target taken on the first 'descend' tick (anchor + aimOffsetX);
-   * null - no target for this descend.
-   */
-  private fixedAimX: number | null = null;
+  private readonly steer: SteerSpec;
+  /** Current aim of this descend (anchor + aimOffsetX, see aimFor()); null - none yet / no target. */
+  private aimX: number | null = null;
+  /** Lateral speed of 'descend', whole px PER TICK (no dt). Read through the vx getter. */
+  private steerVx = 0;
+  /** Ticks accumulated towards the next inertia step (see steering.turn). */
+  private turnCounter = 0;
   private shotsLeft = 0;
   private aimOffsetX = 0;
   private groupMinOffsetX = 0;
@@ -125,10 +149,10 @@ export class Enemy {
     private readonly formation: Formation,
   ) {
     this.kind = slot.kind;
-    const { sprite, aim } = ENEMY_KINDS[slot.kind];
+    const { sprite, steer } = ENEMY_KINDS[slot.kind];
     this.width = sprite.width;
     this.height = sprite.height;
-    this.aim = aim;
+    this.steer = steer;
     this.x = this.slotX();
     this.y = this.slotY();
   }
@@ -157,6 +181,18 @@ export class Enemy {
     return this.currentState === 'diving' || this.currentState === 'returning';
   }
 
+  /**
+   * Lateral speed of 'descend', whole px/tick; 0 outside 'descend'. Derived from the state, so
+   * kill(), leaving past the bottom etc. need not reset steerVx.
+   */
+  get vx(): number {
+    return this.isDescending ? this.steerVx : 0;
+  }
+
+  private get isDescending(): boolean {
+    return this.currentState === 'diving' && this.ticksInState > PEEL_TICKS;
+  }
+
   /** Any alive state -> 'exploding'; ignored otherwise. The enemy stays where it is. */
   kill(): void {
     if (!this.isAlive) return;
@@ -172,7 +208,9 @@ export class Enemy {
     this.aimOffsetX = order.aimOffsetX;
     this.groupMinOffsetX = order.groupMinOffsetX;
     this.groupMaxOffsetX = order.groupMaxOffsetX;
-    this.fixedAimX = null;
+    this.aimX = null;
+    this.steerVx = 0;
+    this.turnCounter = 0;
     this.enter('diving');
   }
 
@@ -203,23 +241,17 @@ export class Enemy {
   }
 
   /**
-   * Ticks 1..PEEL_TICKS: peel segment by stateTicks. Then descend at diveSpeed, steering on X
-   * towards aimX (fixed: anchor + aimOffsetX, taken on tick PEEL_TICKS + 1, see fixedAim();
-   * track: env.targetX of this tick), and
-   * fire by the schedule (see fires()). Leaving past the bottom ends the descend without a shot.
+   * Ticks 1..PEEL_TICKS: peel segment by stateTicks. Then descend (see descend()) and fire by
+   * the schedule (see fires()). Leaving past the bottom ends the descend without a shot.
    */
   private updateDiving(dt: number, env: EnemyEnv): boolean {
     if (this.ticksInState <= PEEL_TICKS) {
       const segment = peelSegmentAt(this.ticksInState);
-      this.x += segment.vx * this.side;
+      this.x = clamp(this.x + segment.vx * this.side, 0, SCREEN_WIDTH - this.width);
       this.y += segment.vy;
     } else {
-      if (this.ticksInState === PEEL_TICKS + 1) this.fixedAimX = this.fixedAim(env.targetX);
-      const aimX = this.aim === 'fixed' ? this.fixedAimX : env.targetX;
-      this.x += steerStep(this.x + Math.floor(this.width / 2), aimX, STEER_SPEED * dt);
-      this.y += env.diveSpeed * dt;
+      this.descend(dt, env);
     }
-    this.x = clamp(this.x, 0, SCREEN_WIDTH - this.width);
     if (this.y >= SCREEN_HEIGHT) {
       // Gone past the bottom: reappear right above the current slot.
       this.enter('returning');
@@ -227,16 +259,44 @@ export class Enemy {
       this.y = -this.height;
       return false;
     }
-    return this.ticksInState > PEEL_TICKS && this.fires();
+    return this.isDescending && this.fires();
   }
 
   /**
-   * 'fixed' target for this descend: the ship's center X as the group's anchor, clamped so that
-   * every member's target (anchor + its aimOffsetX) keeps its sprite on screen, plus this
+   * One 'descend' tick (d = stateTicks - PEEL_TICKS, 1-based), profile ENEMY_KINDS[kind].steer:
+   * d = 1 - vx continues the peel arc; on retarget ticks the aim is taken anew (aimFor());
+   * vx turns towards the desired value (steering.turn); x moves by vx px PER TICK (no dt,
+   * ADR 003), y by diveSpeed * dt. x stays on screen; hitting an edge zeroes vx into it.
+   */
+  private descend(dt: number, env: EnemyEnv): void {
+    const { retargetTicks, turnTicks, maxVx } = this.steer;
+    const d = this.ticksInState - PEEL_TICKS;
+    if (d === 1) {
+      this.steerVx = clamp(LAST_PEEL_VX * this.side, -maxVx, maxVx);
+      this.turnCounter = 0;
+    }
+    if (isRetargetTick(d, retargetTicks)) this.aimX = this.aimFor(env.targetX);
+    const desired = desiredVx(this.x + Math.floor(this.width / 2), this.aimX, maxVx);
+    const next = turn({ vx: this.steerVx, turnCounter: this.turnCounter }, desired, turnTicks);
+    this.steerVx = next.vx;
+    this.turnCounter = next.turnCounter;
+    const maxX = SCREEN_WIDTH - this.width;
+    const x = this.x + this.steerVx;
+    this.x = clamp(x, 0, maxX);
+    if ((x < 0 && this.steerVx < 0) || (x > maxX && this.steerVx > 0)) {
+      this.steerVx = 0;
+      this.turnCounter = 0;
+    }
+    this.y += env.diveSpeed * dt;
+  }
+
+  /**
+   * Aim for this descend tick (every kind): the ship's center X as the group's anchor, clamped so
+   * that every member's target (anchor + its aimOffsetX) keeps its sprite on screen, plus this
    * member's offset. The whole group shifts together near an edge instead of squeezing.
    * A solo diver (offsets 0) is never clamped by it: the ship's center stays in [lo, hi].
    */
-  private fixedAim(targetX: number | null): number | null {
+  private aimFor(targetX: number | null): number | null {
     if (targetX === null) return null;
     const half = Math.floor(this.width / 2);
     const lo = half - this.groupMinOffsetX;
@@ -300,16 +360,6 @@ function peelSegmentAt(tick: number): PeelSegment {
     if (tick <= end) return segment;
   }
   throw new Error(`Peel tick ${tick} is past the arc (${PEEL_TICKS})`);
-}
-
-/**
- * X move of one 'descend' tick: a whole step towards aimX, or 0 when there is no target or it
- * is closer than one step (no jitter over the target: the gap shrinks by exactly one step).
- */
-function steerStep(centerX: number, aimX: number | null, step: number): number {
-  if (aimX === null) return 0;
-  const gap = aimX - centerX;
-  return Math.abs(gap) >= step ? Math.sign(gap) * step : 0;
 }
 
 function clamp(value: number, min: number, max: number): number {

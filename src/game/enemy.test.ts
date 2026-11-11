@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import type { EnemyEnv } from './enemy';
 import {
+  DRONE_RETARGET_TICKS,
   Enemy,
   ENEMY_FIRE_INTERVAL_TICKS,
   ENEMY_KINDS,
   EXPLOSION_FRAME_TICKS,
   EXPLOSION_TICKS,
   PEEL_SEGMENTS,
+  STRIKER_TURN_TICKS,
 } from './enemy';
 import { DRONE_SPRITE, EXPLOSION_FRAMES, RAIDER_SPRITE, STRIKER_SPRITE } from './enemy-art';
 import { CELL_HEIGHT, CELL_WIDTH, Formation, SWAY_RANGE } from './formation';
 import type { EnemyKind } from './levels';
 import { SHIP_Y } from './ship';
+import { EVASION_CASES, EVASION_START, runEvasion } from './test-evasion';
 import { diveOrder } from './test-levels';
 
 const ENV: EnemyEnv = { diveSpeed: 60, targetX: null };
@@ -435,7 +438,10 @@ describe('Enemy dive', () => {
   });
 });
 
-/** A kind's enemy after the peel (side = 1, still formation): x = 128 / 127, center 133. */
+/**
+ * A kind's enemy after the peel (side = 1, still formation): x = 128 / 127, center 133.
+ * striker: vx = side on descend tick 1 (continues the arc).
+ */
 function afterPeel(kind: EnemyKind, env: EnemyEnv = ENV): Enemy {
   const { enemy } = newEnemyOf(kind);
   enemy.startDive(diveOrder());
@@ -444,10 +450,20 @@ function afterPeel(kind: EnemyKind, env: EnemyEnv = ENV): Enemy {
 }
 
 describe('Enemy aim', () => {
-  it('drone and raider aim once, striker tracks', () => {
-    expect(ENEMY_KINDS.drone.aim).toBe('fixed');
-    expect(ENEMY_KINDS.striker.aim).toBe('track');
-    expect(ENEMY_KINDS.raider.aim).toBe('fixed');
+  it('kind profiles: drone re-aims every DRONE_RETARGET_TICKS = 30 ticks, striker every tick with STRIKER_TURN_TICKS = 8 inertia, raider once', () => {
+    expect(DRONE_RETARGET_TICKS).toBe(30);
+    expect(STRIKER_TURN_TICKS).toBe(8);
+    expect(ENEMY_KINDS.drone.steer).toEqual({
+      retargetTicks: DRONE_RETARGET_TICKS,
+      turnTicks: 0,
+      maxVx: 1,
+    });
+    expect(ENEMY_KINDS.striker.steer).toEqual({
+      retargetTicks: 1,
+      turnTicks: STRIKER_TURN_TICKS,
+      maxVx: 1,
+    });
+    expect(ENEMY_KINDS.raider.steer).toEqual({ retargetTicks: null, turnTicks: 0, maxVx: 1 });
   });
 
   it.each(['drone', 'striker', 'raider'] as const)(
@@ -462,39 +478,39 @@ describe('Enemy aim', () => {
   );
 
   it('fixed takes the target on the first descend tick and keeps it', () => {
-    const enemy = afterPeel('drone', aimAt(250));
-    expect(enemy.x).toBe(128);
-    step(enemy, 1, aimAt(100));
+    const enemy = afterPeel('raider', aimAt(250));
     expect(enemy.x).toBe(127);
+    step(enemy, 1, aimAt(100));
+    expect(enemy.x).toBe(126);
     for (let i = 1; i <= 10; i++) {
       step(enemy, 1, aimAt(250));
-      expect(enemy.x).toBe(127 - i);
+      expect(enemy.x).toBe(126 - i);
     }
-    expect(enemy.x).toBe(117);
+    expect(enemy.x).toBe(116);
   });
 
   it('fixed reaches its target and then flies straight down', () => {
-    const enemy = afterPeel('drone');
+    const enemy = afterPeel('raider');
     for (let i = 1; i <= 20; i++) {
       const y = enemy.y;
       step(enemy, 1, aimAt(123));
-      expect(enemy.x).toBe(i <= 10 ? 128 - i : 118);
+      expect(enemy.x).toBe(i <= 10 ? 127 - i : 117);
       expect(enemy.y).toBe(y + 1);
     }
     expect(centerX(enemy)).toBe(123);
   });
 
   it('fixed with no target on the first descend tick flies straight down', () => {
-    const enemy = afterPeel('drone');
+    const enemy = afterPeel('raider');
     step(enemy, 1, aimAt(null));
     for (let i = 0; i < 30; i++) {
       step(enemy, 1, aimAt(0));
-      expect(enemy.x).toBe(128);
+      expect(enemy.x).toBe(127);
     }
   });
 
   it('fixed does not reuse the target of the previous sortie', () => {
-    const { enemy } = newEnemyOf('drone');
+    const { enemy } = newEnemyOf('raider');
     enemy.startDive(diveOrder());
     step(enemy, P + 1, aimAt(100));
     let ticks = 0;
@@ -505,53 +521,85 @@ describe('Enemy aim', () => {
     expect(enemy.state).toBe('formation');
     enemy.startDive(diveOrder({ sortieId: 2 }));
     step(enemy, P);
-    expect(enemy.x).toBe(128);
+    expect(enemy.x).toBe(127);
     step(enemy, 1, aimAt(null));
     for (let i = 0; i < 10; i++) {
       step(enemy, 1, aimAt(100));
+      expect(enemy.x).toBe(127);
+    }
+  });
+
+  it('drone keeps its target for DRONE_RETARGET_TICKS ticks, then takes a new one', () => {
+    const N = DRONE_RETARGET_TICKS;
+    const enemy = afterPeel('drone');
+    expect(enemy.x).toBe(128);
+    step(enemy, 1, aimAt(200)); // d = 1: aims right
+    expect(enemy.vx).toBe(1);
+    expect(enemy.x).toBe(129);
+    for (let d = 2; d <= N; d++) {
+      step(enemy, 1, aimAt(0)); // the ship went left, but the old aim holds
+      expect(enemy.vx).toBe(1);
+      expect(enemy.x).toBe(128 + d);
+    }
+    step(enemy, 1, aimAt(0)); // d = 1 + N: re-aim
+    expect(enemy.vx).toBe(-1);
+    expect(enemy.x).toBe(127 + N);
+  });
+
+  it('drone with no target on the first descend tick picks the ship up on the next re-aim', () => {
+    const N = DRONE_RETARGET_TICKS;
+    const enemy = afterPeel('drone');
+    step(enemy, 1, aimAt(null)); // d = 1: the ship is down
+    expect(enemy.x).toBe(128);
+    for (let d = 2; d <= N; d++) {
+      step(enemy, 1, aimAt(100)); // the ship is back, not a re-aim tick yet
+      expect(enemy.vx).toBe(0);
       expect(enemy.x).toBe(128);
     }
-  });
-
-  it('track follows the target of every tick', () => {
-    const enemy = afterPeel('striker');
+    step(enemy, 1, aimAt(100)); // d = 1 + N: picks the ship up
+    expect(enemy.vx).toBe(-1);
     expect(enemy.x).toBe(127);
-    let x = enemy.x;
-    for (let i = 0; i < 5; i++) {
-      step(enemy, 1, aimAt(0));
-      expect(enemy.x).toBe(--x);
-    }
-    for (let i = 0; i < 3; i++) {
-      step(enemy, 1, aimAt(250));
-      expect(enemy.x).toBe(++x);
-    }
-    for (let i = 0; i < 4; i++) {
-      step(enemy, 1, aimAt(null));
-      expect(enemy.x).toBe(x);
-    }
-    step(enemy, 1, aimAt(0));
-    expect(enemy.x).toBe(x - 1);
+    step(enemy, 1, aimAt(null)); // not a re-aim tick: keeps the new aim
+    expect(enemy.x).toBe(126);
   });
 
-  it('does not jitter over the target with a fractional center', () => {
-    const enemy = afterPeel('striker');
-    enemy.x = 127.25;
-    step(enemy, 20, aimAt(133));
-    expect(enemy.x).toBe(127.25);
-    enemy.x = 127.75;
-    step(enemy, 20, aimAt(133));
-    expect(enemy.x).toBe(127.75);
-    step(enemy, 20, aimAt(134));
-    expect(enemy.x).toBe(127.75);
-    enemy.x = 127;
+  it('drone stops steering when the ship is down on a re-aim tick', () => {
+    const N = DRONE_RETARGET_TICKS;
+    const enemy = afterPeel('drone');
+    step(enemy, N, aimAt(0)); // d = 1 ... N: flies left
+    expect(enemy.x).toBe(128 - N);
+    step(enemy, 1, aimAt(null)); // d = 1 + N: no target
+    expect(enemy.vx).toBe(0);
+    for (let i = 0; i < 10; i++) {
+      const y = enemy.y;
+      step(enemy, 1, aimAt(0));
+      expect(enemy.x).toBe(128 - N);
+      expect(enemy.y).toBe(y + 1);
+    }
+  });
+
+  it.each([
+    [128.25, 133],
+    [128.75, 133],
+    [128.75, 134],
+  ])('does not jitter over the target with a fractional center (x %s, target %i)', (x, target) => {
+    const enemy = afterPeel('drone');
+    enemy.x = x;
+    step(enemy, 20, aimAt(target));
+    expect(enemy.x).toBe(x);
+  });
+
+  it('steps once to a target 1 px away and stays', () => {
+    const enemy = afterPeel('drone');
+    enemy.x = 128;
     step(enemy, 1, aimAt(134));
-    expect(enemy.x).toBe(128);
+    expect(enemy.x).toBe(129);
     step(enemy, 10, aimAt(134));
-    expect(enemy.x).toBe(128);
+    expect(enemy.x).toBe(129);
   });
 
   it.each([60, 120])('Y step at %i px/s does not depend on steering', (diveSpeed) => {
-    const enemy = afterPeel('striker', aimAt(0, diveSpeed));
+    const enemy = afterPeel('drone', aimAt(0, diveSpeed));
     for (let i = 0; i < 5; i++) {
       const { x, y } = enemy;
       step(enemy, 1, aimAt(0, diveSpeed));
@@ -562,10 +610,10 @@ describe('Enemy aim', () => {
 
   it.each([
     [0, 0],
-    [255, SCREEN_WIDTH - 13],
+    [255, SCREEN_WIDTH - 11],
   ] as const)('stays on screen while aiming at the edge (target %i)', (target, endX) => {
-    const enemy = afterPeel('striker');
-    expect(enemy.width).toBe(13);
+    const enemy = afterPeel('drone');
+    expect(enemy.width).toBe(11);
     enemy.x = target === 0 ? 3 : SCREEN_WIDTH - enemy.width - 3;
     for (let i = 0; i < 10; i++) {
       step(enemy, 1, aimAt(target));
@@ -577,16 +625,175 @@ describe('Enemy aim', () => {
 
   it('measures the gap from the center of its own sprite', () => {
     const drone = afterPeel('drone');
-    const striker = afterPeel('striker');
+    const raider = afterPeel('raider');
     drone.x = 100;
-    striker.x = 100;
+    raider.x = 100;
     step(drone, 5, aimAt(105));
-    step(striker, 1, aimAt(105));
-    expect(striker.x).toBe(99);
-    step(striker, 4, aimAt(105));
+    step(raider, 1, aimAt(105));
+    expect(raider.x).toBe(99);
+    step(raider, 4, aimAt(105));
     expect(drone.x).toBe(100);
-    expect(striker.x).toBe(99);
+    expect(raider.x).toBe(99);
   });
+});
+
+describe('Enemy vx', () => {
+  it('is 0 in the formation and on every peel tick, though x moves', () => {
+    const { enemy } = newEnemyOf('striker');
+    expect(enemy.vx).toBe(0);
+    enemy.startDive(diveOrder());
+    const x0 = enemy.x;
+    for (let i = 0; i < P; i++) {
+      step(enemy, 1, aimAt(0));
+      expect(enemy.vx).toBe(0);
+    }
+    expect(enemy.x).not.toBe(x0);
+  });
+
+  it('in descend equals the actual x shift of every tick (striker, with inertia)', () => {
+    const enemy = afterPeel('striker');
+    const targets: readonly (number | null)[] = [
+      ...Array<number>(20).fill(0),
+      ...Array<number>(20).fill(250),
+      ...Array<null>(20).fill(null),
+      ...Array<number>(10).fill(0),
+    ];
+    const seen = new Set<number>();
+    for (const target of targets) {
+      const x = enemy.x;
+      step(enemy, 1, aimAt(target));
+      expect(enemy.x - x).toBe(enemy.vx);
+      seen.add(enemy.vx);
+    }
+    expect(seen).toEqual(new Set([-1, 0, 1])); // the run really turned both ways
+  });
+
+  it('is 0 after leaving past the bottom', () => {
+    const enemy = afterPeel('drone');
+    step(enemy, 1, aimAt(0));
+    expect(enemy.vx).toBe(-1);
+    enemy.y = SCREEN_HEIGHT - 1;
+    step(enemy, 1, aimAt(0));
+    expect(enemy.state).toBe('returning');
+    expect(enemy.vx).toBe(0);
+  });
+
+  it('is 0 after kill() in descend', () => {
+    const enemy = afterPeel('drone');
+    step(enemy, 1, aimAt(0));
+    expect(enemy.vx).toBe(-1);
+    enemy.kill();
+    expect(enemy.state).toBe('exploding');
+    expect(enemy.vx).toBe(0);
+  });
+
+  it.each([
+    { side: 1, target: 0, dir: -1, edge: 'left' },
+    { side: -1, target: 255, dir: 1, edge: 'right' },
+  ] as const)('overshooting into the $edge screen edge zeroes vx', ({ side, target, dir }) => {
+    const { enemy } = newEnemyOf('striker');
+    enemy.startDive(diveOrder({ side }));
+    step(enemy, P);
+    const edgeX = dir > 0 ? SCREEN_WIDTH - enemy.width : 0;
+    for (let i = 0; enemy.x !== edgeX; i++) {
+      if (i >= 400) throw new Error('never reached the edge');
+      step(enemy, 1, aimAt(target));
+    }
+    expect(enemy.vx).toBe(dir); // arrived at full speed, by its own steering
+    for (let i = 0; i < STRIKER_TURN_TICKS; i++) {
+      step(enemy, 1, aimAt(target));
+      expect(enemy.x).toBe(edgeX);
+      expect(enemy.vx).toBe(0);
+    }
+    expect(enemy.state).toBe('diving');
+  });
+});
+
+describe('Enemy striker inertia', () => {
+  const T = STRIKER_TURN_TICKS;
+
+  it.each([
+    [1, 0],
+    [1, 250],
+    [1, null],
+    [-1, 0],
+    [-1, 250],
+    [-1, null],
+  ] as const)('continues the peel arc on descend tick 1 (side %i, target %s)', (side, target) => {
+    const { enemy } = newEnemyOf('striker');
+    enemy.startDive(diveOrder({ side }));
+    step(enemy, P);
+    const x = enemy.x;
+    step(enemy, 1, aimAt(target));
+    expect(enemy.vx).toBe(side);
+    expect(enemy.x - x).toBe(side);
+  });
+
+  it('reverses by the layout: T - 1 ticks on the old course, T ticks still, then back', () => {
+    const enemy = afterPeel('striker'); // x = 127, the target is to the left
+    const vxs: number[] = [];
+    for (let d = 1; d <= 3 * T; d++) {
+      step(enemy, 1, aimAt(0));
+      vxs.push(enemy.vx);
+    }
+    expect(vxs).toEqual(vxs.map((_, i) => (i + 1 < T ? 1 : i + 1 < 2 * T ? 0 : -1)));
+    expect(enemy.x).toBe(127 + (T - 1) - (T + 1));
+  });
+
+  it('wobbles within T - 1 px over a standing target', () => {
+    const enemy = afterPeel('striker');
+    const target = 160;
+    let reached = false;
+    let maxGap = 0;
+    const dirs = new Set<number>();
+    for (let i = 0; i < 1000; i++) {
+      step(enemy, 1, aimAt(target));
+      if (enemy.state !== 'diving') break;
+      if (Math.abs(centerX(enemy) - target) < 1) reached = true;
+      if (!reached) continue;
+      maxGap = Math.max(maxGap, Math.abs(centerX(enemy) - target));
+      if (enemy.vx !== 0) dirs.add(enemy.vx);
+    }
+    expect(reached).toBe(true);
+    expect(maxGap).toBeLessThanOrEqual(T - 1);
+    expect(dirs).toEqual(new Set([-1, 1])); // it does wobble
+  });
+
+  it('sheds vx within T ticks when the target is gone, then flies straight down', () => {
+    const enemy = afterPeel('striker');
+    step(enemy, 20, aimAt(0)); // d = 16+: vx = -1
+    expect(enemy.vx).toBe(-1);
+    let n = 0;
+    while (enemy.vx !== 0 && n <= T) {
+      step(enemy, 1, aimAt(null));
+      n++;
+    }
+    expect(n).toBeLessThanOrEqual(T);
+    const x = enemy.x;
+    for (let i = 0; i < 30; i++) {
+      step(enemy, 1, aimAt(null));
+      expect(enemy.vx).toBe(0);
+      expect(enemy.x).toBe(x);
+    }
+  });
+
+  it('starts the evasion scenario from EVASION_START', () => {
+    const enemy = afterPeel('striker');
+    expect({ x: enemy.x, y: enemy.y }).toEqual({ x: EVASION_START.x, y: EVASION_START.y });
+  });
+
+  it.each(EVASION_CASES)(
+    'at $diveSpeed px/s rams a standing ship, misses a feint at y >= $turnY',
+    ({ diveSpeed, turnY }) => {
+      const standing = afterPeel('striker');
+      const env = (t: number): EnemyEnv => aimAt(t, diveSpeed);
+      expect(runEvasion(standing, (t) => step(standing, 1, env(t)), { move: 'stand' })).toBe('ram');
+      const feinted = afterPeel('striker');
+      expect(runEvasion(feinted, (t) => step(feinted, 1, env(t)), { move: 'feint', turnY })).toBe(
+        'miss',
+      );
+    },
+  );
 });
 
 describe('PEEL_SEGMENTS', () => {
@@ -817,18 +1024,20 @@ describe('Enemy group aim', () => {
     }
   });
 
-  it('track does not read the group offsets', () => {
+  it('every kind reads the group offsets: a striker aims at the target plus its offset', () => {
     const plain = afterPeel('striker');
     const { enemy: offset } = newEnemyOf('striker');
     offset.startDive(diveOrder({ aimOffsetX: 32, groupMinOffsetX: 0, groupMaxOffsetX: 32 }));
     step(offset, P);
     expect(offset.x).toBe(plain.x);
-    for (let i = 0; i < 40; i++) {
-      const env = aimAt(i < 20 ? 30 : 220);
-      step(plain, 1, env);
-      step(offset, 1, env);
+    for (let i = 0; i < 60; i++) {
+      const target = i < 30 ? 60 : 150;
+      step(plain, 1, aimAt(target + 32));
+      step(offset, 1, aimAt(target));
       expect(offset.x).toBe(plain.x);
     }
+    expect(centerX(offset)).toBe(133);
+    expect(offset.state).toBe('diving');
   });
 
   it('a new dive does not keep the offsets of the previous order', () => {

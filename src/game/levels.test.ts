@@ -10,7 +10,7 @@ import {
   parseLayout,
   parseStartLevel,
 } from './levels';
-import { SHIP_HEIGHT } from './ship';
+import { SHIP_HEIGHT, SHIP_SPEED } from './ship';
 import { SHOT_HEIGHT, SHOT_SPEED } from './shot';
 import { passiveLevel } from './test-levels';
 
@@ -246,6 +246,23 @@ describe('LEVELS', () => {
       [8, 1],
     ]);
   });
+});
+
+describe('ENEMY_KINDS steer', () => {
+  it.each(Object.entries(ENEMY_KINDS))(
+    '%s steers by whole px per tick, slower than the ship',
+    (_kind, { steer }) => {
+      expect(Number.isInteger(steer.maxVx)).toBe(true);
+      expect(steer.maxVx).toBeGreaterThanOrEqual(1);
+      expect(steer.maxVx).toBeLessThan(SHIP_SPEED * TICK_SECONDS);
+      if (steer.retargetTicks !== null) {
+        expect(Number.isInteger(steer.retargetTicks)).toBe(true);
+        expect(steer.retargetTicks).toBeGreaterThanOrEqual(1);
+      }
+      expect(Number.isInteger(steer.turnTicks)).toBe(true);
+      expect(steer.turnTicks).toBeGreaterThanOrEqual(0);
+    },
+  );
 });
 
 describe('parseStartLevel', () => {

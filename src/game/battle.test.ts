@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
 import { Battle, LEVEL_PAUSE_TICKS } from './battle';
-import { EXPLOSION_TICKS, PEEL_SEGMENTS } from './enemy';
+import { EXPLOSION_TICKS, PEEL_SEGMENTS, STRIKER_TURN_TICKS } from './enemy';
 import { LEVELS } from './levels';
 import type { PlayerIntent } from './player';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y } from './ship';
@@ -172,13 +172,15 @@ describe('Battle aim', () => {
     const battle = new Battle(createRng(1), {
       levels: [passiveLevel(['S..........'], { firstDiveDelayTicks: 1 })],
     });
-    run(battle, 1 + P + 120);
+    // A flank striker first runs on / stands for about 15 ticks (inertia), then wobbles
+    // within T - 1 px; the ram comes at about 165.
+    run(battle, 1 + P + 160);
     const enemy = battle.wave.enemies[0]!;
     const ship = battle.player.ship;
     expect(enemy.state).toBe('diving');
     const enemyCenter = enemy.x + Math.floor(enemy.width / 2);
     const shipCenter = ship.x + Math.floor(SHIP_WIDTH / 2);
-    expect(Math.abs(enemyCenter - shipCenter)).toBeLessThan(1);
+    expect(Math.abs(enemyCenter - shipCenter)).toBeLessThanOrEqual(STRIKER_TURN_TICKS - 1);
   });
 });
 
@@ -206,9 +208,12 @@ describe('Battle ram', () => {
     const enemy = battle.wave.enemies[0]!;
     expect(enemy.state).toBe('diving');
     battle.player.hit();
+    run(battle, STRIKER_TURN_TICKS);
     const x = enemy.x;
-    run(battle, 10);
-    expect(enemy.x).toBe(x);
+    for (let i = 0; i < 10; i++) {
+      run(battle, 1);
+      expect(enemy.x).toBe(x);
+    }
     expect(enemy.state).toBe('diving');
   });
 });

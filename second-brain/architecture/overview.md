@@ -107,8 +107,14 @@ maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpe
   цвета; вид стартовый, утверждает владелец); разбираются при загрузке модуля.
   `ENEMY_SHOT_COLOR = '#ff5fd2'` — цвет вражеского выстрела (не белый, не корпус корабля, не
   цвет звёзд; стартовый, утверждает владелец).
-- `enemy.ts` — `ENEMY_KINDS { sprite, aim }` по виду (`Aim = 'fixed' | 'track'`: `drone` и `raider` —
-  `fixed`, `striker` — `track`); `Enemy(slot, formation)`: размер из
+- `steering.ts` — чистые функции боковой рулёжки `descend`, без импортов: `SteerSpec
+{ retargetTicks, turnTicks, maxVx }` (профиль вида), `SteerState { vx, turnCounter }`,
+  `isRetargetTick(d, N)` (тики 1, 1+N, …; `null` — только 1-й), `desiredVx(centerX, aimX,
+maxVx)` (`±maxVx` при gap ≥ 1, иначе 0), `turn(state, desired, T)` (инерция: `vx` меняется на
+  1 px/тик за `T` тиков; `T = 0` — сразу; достижение `desired` сбрасывает счётчик, смена
+  `desired` на полпути — нет).
+- `enemy.ts` — `ENEMY_KINDS { sprite, steer }` по виду (`steer: SteerSpec`; профили `drone
+{DRONE_RETARGET_TICKS = 30, 0, 1}`, `striker {1, STRIKER_TURN_TICKS = 8, 1}` (инерция: разворот — `T − 1` тиков прежним курсом, `T` тиков `vx = 0`, затем обратно), `raider {null, 0, 1}`); `Enemy(slot, formation)`: размер из
   спрайта вида (хитбокс = картинка), позиция — левый верхний угол = слот; в `formation`
   `update(dt, env)` пересчитывает позицию из слота (`EnemyEnv { diveSpeed, targetX }` —
   новый объект на тик от волны). Состояния `formation | diving | returning | exploding | dead`:
@@ -116,15 +122,18 @@ maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpe
   только из `formation`, первый шаг — в следующем `update`; `shots` — выстрелов на этот вылет
   (счётчик и сдвиги с прошлого вылета не переносятся); сдвиги — для группы `raider`, у
   одиночки все 0. `diving` = peel (`PEEL_SEGMENTS` — отрезки в px/тик, зеркалятся по
-  `side`, фаза по `stateTicks`; 14 тиков) → descend: `vy = diveSpeed`, по X шаг `STEER_SPEED`
-  (1 px/тик) к `aimX`, если до него по центру врага (`x + floor(width / 2)`) ≥ 1 px, иначе
-  стоит; `fixed` — цель берётся в первом тике descend (`null` → весь descend прямо вниз): якорь —
-  центр корабля, зажатый в `[floor(w/2) - groupMinOffsetX, SCREEN_WIDTH - w + floor(w/2) -
-groupMaxOffsetX]`, плюс `aimOffsetX` (у края группа сдвигается целиком, не сжимаясь;
-  одиночку зажим не задевает); `track` поля группы не читает,
-  `track` — `targetX` каждого тика (`null` → `vx = 0`); `x` зажат в `[0, SCREEN_WIDTH - width]`. Уход за низ (`y >= SCREEN_HEIGHT`) →
-  `returning`: над текущим слотом (`y = -height`), шаг 1 px по осям (`STEER_SPEED` — и в descend, и в
-  `returning`; `RETURN_SPEED` = 60 px/с), не ниже `slotY`; в пределах шага — защёлкивается в слот →
+  `side`, фаза по `stateTicks`; 14 тиков; `x` зажат в экран) → descend, тик `d = stateTicks - 14`
+  по профилю `steer`: в `d = 1` `vx` продолжает последний отрезок дуги (зажат в `±maxVx`); в
+  тиках `isRetargetTick(d, retargetTicks)` цель берётся заново через `aimFor` (для всех видов;
+  `null` → `desiredVx = 0`, прямо вниз): якорь — центр корабля, зажатый в `[floor(w/2) -
+groupMinOffsetX, SCREEN_WIDTH - w + floor(w/2) - groupMaxOffsetX]`, плюс `aimOffsetX` (у края
+  группа сдвигается целиком, не сжимаясь; одиночку зажим не задевает); `desiredVx` по центру
+  врага (`x + floor(width / 2)`) → `turn` → `x += vx` (целые px/тик без `dt`),
+  `y += diveSpeed · dt`; `x` зажат в `[0, SCREEN_WIDTH - width]`, упор в край обнуляет `vx` в
+  стену. Состояние вылета `aimX`/`steerVx`/`turnCounter` сбрасывается только в `startDive`;
+  геттер `vx` — от состояния (0 вне descend). Уход за низ (`y >= SCREEN_HEIGHT`) →
+  `returning`: над текущим слотом (`y = -height`), шаг 1 px по осям (`STEER_SPEED` — шаг X
+  только в `returning`; `RETURN_SPEED` = 60 px/с), не ниже `slotY`; в пределах шага — защёлкивается в слот →
   `formation`. `kill()` (из любого живого) → `exploding` на месте попадания → через
   `EXPLOSION_TICKS = 16` (`EXPLOSION_FRAME_TICKS = 8` × 2 кадра) → `dead`. `stateTicks` —
   «Правило тиков переходов»: 0 в тике входа, `update` сначала `++`, затем таймер, затем
@@ -182,12 +191,16 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   углу раскладки ширины 11, `swaySpeed = 15`, стартовый x = 42 — далеко от столбца
   выстрела); `TWO_LEVELS` — два разных пассивных уровня для теста смены уровня
   (один `drone` в углу; два `drone` по углам), уровень 3+ повторяет второй.
+- `test-evasion.ts` — только для тестов: сценарий уходимости `striker` — `EVASION_CASES`
+  (`{ diveSpeed, turnY }`: 180/125, 120/135 — середины окон «`T = 8` уходит, `T = 0`
+  таран»), `EVASION_START`, `runEvasion(diver, step, script)` (скриптовый корабль стоит /
+  финтит, таран — `overlaps`); используют `enemy.test.ts` и `steering.test.ts`.
 - `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
   генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels? }`
   (уровень по умолчанию 1, таблица — `LEVELS`; тесты внедряют таблицы из
   `test-levels.ts`). `readonly player`, геттеры `level`, `wave`, `phase`
   (`BattlePhase = 'playing' | 'cleared'`). `update(dt, intent)`: игрок → волна (получает
-  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` пикирующие летят прямо вниз) → коллизии (только `playing`) → фазы. Когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
+  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → коллизии (только `playing`) → фазы. Когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
   через `LEVEL_PAUSE_TICKS = 90` (1,5 с, без надписи) — `level++`, новая `Wave`
   (рисуется в этом тике в начальных позициях, первый `update` — в следующем), `playing`.
   За концом таблицы повторяется последний уровень. В `cleared` игрок двигается и
@@ -224,11 +237,11 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
 `main → {config, engine/*, game/levels, game/scenes/title-scene}`,
 `wave → {attack-director, enemy, enemy-shot, formation, levels}` (`Rng`, `EnemyEnv` — type),
 `attack-director → {engine/rng, formation}` (`Rng`, `DiveOrder`, `Enemy`, `LevelConfig` — type),
-`enemy → {config, enemy-art, ship}` (`Formation`, `EnemyKind`, `Slot`, `Sprite` — type), `formation → config`, `enemy-art → sprite`,
+`enemy → {config, enemy-art, ship, steering}` (`Formation`, `EnemyKind`, `Slot`, `Sprite`, `SteerSpec` — type), `steering` — без импортов, `formation → config`, `enemy-art → sprite`,
 `levels → config`, `player → ship` (`Ship`, `SHIP_START_X`; `Input`, `Shot`, `MoveDir` — `import type`),
 `ship → {config, art, shot}`, `art → sprite`, `shot` — без импортов, `enemy-shot → config`;
 `scene-test-utils → config` (типы `Scene`/`Input` — `import type`); `canvas-test-utils` —
-без импортов, `test-levels` (`LevelConfig`, `DiveOrder` — type) — оба только из `*.test.ts`. Циклов
+без импортов, `test-levels` (`LevelConfig`, `DiveOrder` — type) — оба только из `*.test.ts`; `test-evasion → {config, collisions, ship}` (`Rect` — type), только из `*.test.ts`. Циклов
 нет; `engine` ничего не знает о `game`.
 
 ## Принципы
@@ -238,5 +251,6 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   (иначе `Math.floor` при отрисовке даёт подёргивание); закреплено тестами
   (`second-brain/decisions/002-integer-speeds.md`). Медленным движениям (покачивание
   строя) разрешены двоичные дроби `1/2`, `1/4`, `1/8` px/тик; таймеры — целые тики
-  (`second-brain/decisions/003-slow-speeds-tick-timers.md`).
+  (`second-brain/decisions/003-slow-speeds-tick-timers.md`). X в `descend` — целые px/тик без
+  `dt` (как `PEEL_SEGMENTS`; допустимо, `dt` фиксирован — ADR 003).
 - Логика отдельно от рендера — тестируется без canvas (Vitest, environment `node`).
