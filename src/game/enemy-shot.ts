@@ -5,7 +5,8 @@ export const ENEMY_SHOT_WIDTH = 1;
 export const ENEMY_SHOT_HEIGHT = 4;
 /**
  * Downward speed in px/s: 4 px/tick, a whole number (ADR 002).
- * Must exceed every level's diveSpeed, so a shot always pulls away from the enemy's nose.
+ * Must exceed the dive speed of every level (the cap is 180 px/s; levels.test checks
+ * levelConfig(1..20)), so a shot always pulls away from the enemy's nose.
  */
 export const ENEMY_SHOT_SPEED = 240;
 

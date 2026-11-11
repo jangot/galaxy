@@ -48,7 +48,8 @@ export const ONE_CORNER_ENEMY: readonly LevelConfig[] = [passiveLevel(['D.......
 /**
  * TWO_LEVELS: two distinct passive levels for level-change tests. Level 1 - one drone in the
  * top-left cell, level 2 - two drones in the corners of a full-width (11) layout; both far from
- * the ship's shot column (x = 127). Level 3+ repeats level 2.
+ * the ship's shot column (x = 127). Level 3+ is level 2 with dive timers shrunk by levelConfig's
+ * escalation (still passive).
  */
 export const TWO_LEVELS: readonly LevelConfig[] = [
   passiveLevel(['D..........']),

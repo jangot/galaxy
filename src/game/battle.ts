@@ -23,7 +23,8 @@ export interface BattleOptions {
  * Battle aggregate: everything that happens on the play field, without input or canvas.
  * Holds the player, the current level and its enemy wave, and the phase:
  * playing -> (every enemy dead) -> cleared -> (LEVEL_PAUSE_TICKS) -> playing on the next level.
- * Past the end of the level table the last level repeats.
+ * Past the end of the level table levelConfig escalates the last level
+ * (shorter dive timers, see levels.ts).
  * The rng is the battle's own generator, separate from the scene's (starfield) one.
  */
 export class Battle {

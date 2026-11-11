@@ -3,7 +3,11 @@ import { TICK_SECONDS } from '../config';
 import { ENEMY_KINDS, PEEL_SEGMENTS, RETURN_SPEED, STEER_SPEED } from './enemy';
 import { ENEMY_SHOT_HEIGHT, ENEMY_SHOT_SPEED } from './enemy-shot';
 import {
+  ESCALATION_MIN_FIRST_DELAY_TICKS,
+  ESCALATION_MIN_INTERVAL_TICKS,
+  ESCALATION_STEP_TICKS,
   FORMATION_MAX_COLS,
+  isAllowedDiveSpeed,
   isAllowedSpeed,
   LEVELS,
   levelConfig,
@@ -13,6 +17,8 @@ import {
 import { SHIP_HEIGHT, SHIP_SPEED } from './ship';
 import { SHOT_HEIGHT, SHOT_SPEED } from './shot';
 import { passiveLevel } from './test-levels';
+
+const LEVELS_1_TO_20 = Array.from({ length: 20 }, (_, i) => [i + 1, levelConfig(i + 1)] as const);
 
 describe('parseLayout', () => {
   it('parses kinds, skips empty cells and keeps row-major order', () => {
@@ -69,8 +75,98 @@ describe('levelConfig', () => {
     expect(levelConfig(1)).toBe(LEVELS[0]);
   });
 
-  it('returns the last level past the end of the table', () => {
-    expect(levelConfig(LEVELS.length + 5)).toBe(LEVELS[LEVELS.length - 1]);
+  it.each(LEVELS.map((config, i) => [i + 1, config] as const))(
+    'returns row %i of the table as is',
+    (n, config) => {
+      expect(levelConfig(n)).toBe(config);
+    },
+  );
+
+  it('escalates the last level past the end of the table', () => {
+    expect(levelConfig(LEVELS.length + 1)).toEqual({
+      ...LEVELS[4]!,
+      firstDiveDelayTicks: 84,
+      diveIntervalTicks: 54,
+    });
+  });
+
+  it.each([
+    [6, 84, 54],
+    [7, 78, 48],
+    [8, 72, 42],
+    [9, 66, 36],
+    [10, 60, 30],
+    [20, 60, 30],
+  ] as const)('level %i has first delay %i and interval %i', (n, firstDelay, interval) => {
+    const config = levelConfig(n);
+    expect(config.firstDiveDelayTicks).toBe(firstDelay);
+    expect(config.diveIntervalTicks).toBe(interval);
+  });
+
+  it.each(LEVELS_1_TO_20.filter(([n]) => n > LEVELS.length))(
+    'level %i keeps everything but the dive timers of the last row',
+    (_n, config) => {
+      const last = LEVELS[LEVELS.length - 1]!;
+      expect(config.layout).toBe(last.layout);
+      expect(config.swaySpeed).toBe(last.swaySpeed);
+      expect(config.diveSpeed).toBe(last.diveSpeed);
+      expect(config.maxSorties).toBe(last.maxSorties);
+      expect(config.diverShots).toBe(last.diverShots);
+      expect(config.raiderShots).toBe(last.raiderShots);
+    },
+  );
+
+  it('is pure and does not mutate the table', () => {
+    const snapshot = structuredClone(LEVELS[4]);
+    expect(levelConfig(12)).toEqual(levelConfig(12));
+    expect(LEVELS[4]).toEqual(snapshot);
+  });
+
+  it('is monotonic on levels 1..20 and stops at the floors', () => {
+    for (let i = 1; i < LEVELS_1_TO_20.length; i++) {
+      const prev = LEVELS_1_TO_20[i - 1]![1];
+      const cur = LEVELS_1_TO_20[i]![1];
+      expect(cur.diveSpeed).toBeGreaterThanOrEqual(prev.diveSpeed);
+      expect(cur.firstDiveDelayTicks).toBeLessThanOrEqual(prev.firstDiveDelayTicks);
+      expect(cur.diveIntervalTicks).toBeLessThanOrEqual(prev.diveIntervalTicks);
+    }
+    for (const [n, config] of LEVELS_1_TO_20) {
+      expect(config.firstDiveDelayTicks).toBeGreaterThanOrEqual(ESCALATION_MIN_FIRST_DELAY_TICKS);
+      expect(config.diveIntervalTicks).toBeGreaterThanOrEqual(ESCALATION_MIN_INTERVAL_TICKS);
+      if (n >= 10) {
+        expect(config.firstDiveDelayTicks).toBe(ESCALATION_MIN_FIRST_DELAY_TICKS);
+        expect(config.diveIntervalTicks).toBe(ESCALATION_MIN_INTERVAL_TICKS);
+      }
+    }
+  });
+
+  it('shrinks the timers by ESCALATION_STEP_TICKS per level', () => {
+    const six = levelConfig(6);
+    const seven = levelConfig(7);
+    expect(six.firstDiveDelayTicks - seven.firstDiveDelayTicks).toBe(ESCALATION_STEP_TICKS);
+    expect(six.diveIntervalTicks - seven.diveIntervalTicks).toBe(ESCALATION_STEP_TICKS);
+  });
+
+  it.each([
+    [2, 94, 34],
+    [3, 88, 30],
+    [7, 64, 30],
+    [8, 60, 30],
+  ] as const)(
+    'escalates an injected active table: level %i -> %i / %i',
+    (n, firstDelay, interval) => {
+      const table = [passiveLevel(['D'], { firstDiveDelayTicks: 100, diveIntervalTicks: 40 })];
+      const config = levelConfig(n, table);
+      expect(config.firstDiveDelayTicks).toBe(firstDelay);
+      expect(config.diveIntervalTicks).toBe(interval);
+    },
+  );
+
+  it.each([2, 10])('does not raise timers already below the floor (level %i)', (n) => {
+    const table = [passiveLevel(['D'], { firstDiveDelayTicks: 50, diveIntervalTicks: 20 })];
+    const config = levelConfig(n, table);
+    expect(config.firstDiveDelayTicks).toBe(50);
+    expect(config.diveIntervalTicks).toBe(20);
   });
 
   it.each([0, -1, 1.5, NaN, Infinity])('throws on level %s', (level) => {
@@ -87,7 +183,21 @@ describe('levelConfig', () => {
     const table = [a, b];
     expect(levelConfig(1, table)).toBe(a);
     expect(levelConfig(2, table)).toBe(b);
-    expect(levelConfig(3, table)).toBe(b);
+    expect(levelConfig(3, table)).toEqual({
+      ...b,
+      firstDiveDelayTicks: 1_000_000 - 6,
+      diveIntervalTicks: 1_000_000 - 6,
+    });
+  });
+});
+
+describe('isAllowedDiveSpeed', () => {
+  it.each([60, 90, 120, 150, 180])('allows %s px/s', (speed) => {
+    expect(isAllowedDiveSpeed(speed)).toBe(true);
+  });
+
+  it.each([0, -60, -90, 30, 45, 75, NaN, Infinity])('rejects %s px/s', (speed) => {
+    expect(isAllowedDiveSpeed(speed)).toBe(false);
   });
 });
 
@@ -102,33 +212,25 @@ describe('isAllowedSpeed', () => {
 });
 
 describe('LEVELS', () => {
-  it.each(LEVELS.map((c, i) => [i + 1, c] as const))('level %i layout is valid', (_n, config) => {
+  it.each(LEVELS_1_TO_20)('level %i layout is valid', (_n, config) => {
     expect(() => parseLayout(config.layout)).not.toThrow();
     expect(parseLayout(config.layout).cols).toBe(10);
     expect(isAllowedSpeed(config.swaySpeed)).toBe(true);
   });
 
-  it.each(LEVELS.map((c, i) => [i + 1, c] as const))(
-    'level %i dive fields follow the speed and timer rules',
-    (_n, config) => {
-      expect(isAllowedSpeed(config.diveSpeed)).toBe(true);
-      expect(Number.isInteger(config.diveSpeed * TICK_SECONDS)).toBe(true);
-      for (const value of [
-        config.firstDiveDelayTicks,
-        config.diveIntervalTicks,
-        config.maxSorties,
-      ]) {
-        expect(Number.isInteger(value)).toBe(true);
-        expect(value).toBeGreaterThanOrEqual(1);
-      }
-      expect(Number.isInteger(config.diverShots)).toBe(true);
-      expect(config.diverShots).toBeGreaterThanOrEqual(0);
-      // A returning enemy must be able to catch up with its swaying slot.
-      expect(config.swaySpeed).toBeLessThan(STEER_SPEED);
-    },
-  );
+  it.each(LEVELS_1_TO_20)('level %i dive fields follow the speed and timer rules', (_n, config) => {
+    expect(isAllowedDiveSpeed(config.diveSpeed)).toBe(true);
+    for (const value of [config.firstDiveDelayTicks, config.diveIntervalTicks, config.maxSorties]) {
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(1);
+    }
+    expect(Number.isInteger(config.diverShots)).toBe(true);
+    expect(config.diverShots).toBeGreaterThanOrEqual(0);
+    // A returning enemy must be able to catch up with its swaying slot.
+    expect(config.swaySpeed).toBeLessThan(STEER_SPEED);
+  });
 
-  it.each(LEVELS.map((c, i) => [i + 1, c] as const))(
+  it.each(LEVELS_1_TO_20)(
     'level %i: the player shot cannot tunnel through a diving enemy',
     (_n, config) => {
       const maxDown = Math.max(
@@ -141,19 +243,20 @@ describe('LEVELS', () => {
     },
   );
 
-  it.each(LEVELS.map((c, i) => [i + 1, c] as const))(
-    'level %i: an enemy shot outruns the dive',
-    (_n, config) => {
-      expect(ENEMY_SHOT_SPEED).toBeGreaterThan(config.diveSpeed);
-    },
-  );
+  it.each(LEVELS_1_TO_20)('level %i: an enemy shot outruns the dive', (_n, config) => {
+    expect(ENEMY_SHOT_SPEED).toBeGreaterThan(config.diveSpeed);
+  });
+
+  it.each(LEVELS_1_TO_20)('level %i: the dive speed is at most 180 px/s', (_n, config) => {
+    expect(config.diveSpeed).toBeLessThanOrEqual(180);
+  });
 
   it('an enemy shot cannot tunnel through the ship', () => {
     // The ship does not move on Y.
     expect(ENEMY_SHOT_SPEED * TICK_SECONDS).toBeLessThan(ENEMY_SHOT_HEIGHT + SHIP_HEIGHT);
   });
 
-  it.each(LEVELS.map((c, i) => [i + 1, c] as const))('level %i raider rules', (_n, config) => {
+  it.each(LEVELS_1_TO_20)('level %i raider rules', (_n, config) => {
     expect(Number.isInteger(config.raiderShots)).toBe(true);
     expect(config.raiderShots).toBeGreaterThanOrEqual(0);
     const raiders = parseLayout(config.layout).slots.filter((s) => s.kind === 'raider');
@@ -185,7 +288,7 @@ describe('LEVELS', () => {
       {
         layout: ['.SSSSSSSS.', 'SSSSSSSSSS', 'DDDDDDDDDD', 'DDDDDDDDDD'],
         swaySpeed: 15,
-        diveSpeed: 120,
+        diveSpeed: 90,
         firstDiveDelayTicks: 150,
         diveIntervalTicks: 150,
         maxSorties: 2,
@@ -205,7 +308,7 @@ describe('LEVELS', () => {
       {
         layout: ['..RR..RR..', '.SSSSSSSS.', 'DDDDDDDDDD', 'DDDDDDDDDD'],
         swaySpeed: 30,
-        diveSpeed: 120,
+        diveSpeed: 150,
         firstDiveDelayTicks: 120,
         diveIntervalTicks: 90,
         maxSorties: 3,

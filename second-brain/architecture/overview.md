@@ -72,7 +72,7 @@
   (движение и огонь); в `invulnerable` корабль управляем.
 - `levels.ts` — `EnemyKind` (`drone | striker | raider`), `LayoutChar` (`D`, `S`, `R`, `.`),
   `LevelConfig { layout, swaySpeed, diveSpeed, firstDiveDelayTicks, diveIntervalTicks,
-maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpeed` — px/с, целые px/тик, ADR 002;
+maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpeed` — px/с, целые или половинные px/тик ≥ 1, ADR 004;
   таймеры — целые тики; `maxSorties` — сколько вылетов одновременно; `diverShots` — выстрелов
   за вылет у `drone`/`striker`, целое ≥ 0, 0 — не стреляют; у уровней 1–5 — 0/0/1/2/2;
   `raiderShots` — выстрелов за вылет у каждого `raider`, целое ≥ 0, > 0 при `R` в раскладке; у
@@ -82,15 +82,18 @@ maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpe
   `Layout { rows, cols, slots }` (слоты row-major: сверху вниз, слева направо),
   `FORMATION_MAX_COLS = 11`, `LEVELS` — пять уровней (уровень 1: `.SSSSSSSS.` + два ряда
   `DDDDDDDDDD`, пике 60, вылеты через 180/180 тиков, 1 в полёте; уровень 2: `.SSSSSSSS.` +
-  `SSSSSSSSSS` + два ряда `DDDDDDDDDD`, пике 120, 150/150, 2 в полёте; уровень 3 — раскладка
+  `SSSSSSSSSS` + два ряда `DDDDDDDDDD`, пике 90, 150/150, 2 в полёте; уровень 3 — раскладка
   уровня 2, `swaySpeed = 30`, пике 120, 120/120, 2 в полёте; уровень 4: `..RR..RR..` +
-  `.SSSSSSSS.` + два ряда `DDDDDDDDDD` (32 слота), `swaySpeed = 30`, пике 120, 120/90, 3 в
+  `.SSSSSSSS.` + два ряда `DDDDDDDDDD` (32 слота), `swaySpeed = 30`, пике 150, 120/90, 3 в
   полёте; уровень 5: `.RRR..RRR.` + `.SSSSSSSS.` + два ряда `DDDDDDDDDD` (34 слота), пике 180,
   90/60, 3 в полёте; у 1–2 `swaySpeed = 15`). Правила таблицы (`R` только в верхнем ряду,
   группа из 2–3) проверяет тест `LEVELS`, не парсер.
   `isAllowedSpeed(pxPerSecond)` — px/тик целое ≥ 1 или ровно `1/2`, `1/4`, `1/8` (ADR 003).
-  `levelConfig(n, levels?)` —
-  целое ≥ 1, за концом таблицы — последний уровень, пустая таблица — ошибка.
+  `isAllowedDiveSpeed(pxPerSecond)` — px/тик ≥ 1 и кратно `1/2` (только вертикаль пике, ADR 004).
+  Эскалация: `ESCALATION_STEP_TICKS = 6`, `ESCALATION_MIN_INTERVAL_TICKS = 30`,
+  `ESCALATION_MIN_FIRST_DELAY_TICKS = 60`. `levelConfig(n, levels?)` — целое ≥ 1; внутри
+  таблицы — та же строка; за концом таблицы — последний уровень с таймингами
+  `min(последний, max(пол, последний − 6·k))`, `k = n − длина таблицы`; пустая таблица — ошибка.
   `parseLayout()` бросает: нет строк, строки разной длины, неизвестный символ, ширина > 11, ни одного врага. `parseStartLevel(value)` — разбор dev-параметра
   `?level=N`: только десятичные цифры и целое ≥ 1, иначе 1. Импортирует `config`
   (`TICK_SECONDS`).
@@ -190,9 +193,10 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `side = 1`, `shots` и сдвиги 0); `ONE_CORNER_ENEMY` (один `drone` в левом верхнем
   углу раскладки ширины 11, `swaySpeed = 15`, стартовый x = 42 — далеко от столбца
   выстрела); `TWO_LEVELS` — два разных пассивных уровня для теста смены уровня
-  (один `drone` в углу; два `drone` по углам), уровень 3+ повторяет второй.
+  (один `drone` в углу; два `drone` по углам), уровень 3+ — второй с эскалацией таймингов
+  (остаётся пассивным).
 - `test-evasion.ts` — только для тестов: сценарий уходимости `striker` — `EVASION_CASES`
-  (`{ diveSpeed, turnY }`: 180/125, 120/135 — середины окон «`T = 8` уходит, `T = 0`
+  (`{ diveSpeed, turnY }`: 180/125, 150/128, 120/135, 90/141 — середины окон «`T = 8` уходит, `T = 0`
   таран»), `EVASION_START`, `runEvasion(diver, step, script)` (скриптовый корабль стоит /
   финтит, таран — `overlaps`); используют `enemy.test.ts` и `steering.test.ts`.
 - `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
@@ -203,7 +207,7 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → коллизии (только `playing`) → фазы. Когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
   через `LEVEL_PAUSE_TICKS = 90` (1,5 с, без надписи) — `level++`, новая `Wave`
   (рисуется в этом тике в начальных позициях, первый `update` — в следующем), `playing`.
-  За концом таблицы повторяется последний уровень. В `cleared` игрок двигается и
+  За концом таблицы — эскалация последнего уровня (`levelConfig`). В `cleared` игрок двигается и
   стреляет как обычно.
 - `battle-render.ts` — `drawBattle(ctx, battle)`: вся отрисовка игровых сущностей,
   слои вражеские выстрелы (`ENEMY_SHOT_COLOR`, 1×4) → выстрел игрока → враги (в порядке
@@ -251,6 +255,7 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   (иначе `Math.floor` при отрисовке даёт подёргивание); закреплено тестами
   (`second-brain/decisions/002-integer-speeds.md`). Медленным движениям (покачивание
   строя) разрешены двоичные дроби `1/2`, `1/4`, `1/8` px/тик; таймеры — целые тики
-  (`second-brain/decisions/003-slow-speeds-tick-timers.md`). X в `descend` — целые px/тик без
+  (`second-brain/decisions/003-slow-speeds-tick-timers.md`). Вертикали пике разрешены
+  половинные px/тик ≥ 1 (`second-brain/decisions/004-half-pixel-dive.md`). X в `descend` — целые px/тик без
   `dt` (как `PEEL_SEGMENTS`; допустимо, `dt` фиксирован — ADR 003).
 - Логика отдельно от рендера — тестируется без canvas (Vitest, environment `node`).

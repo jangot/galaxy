@@ -73,10 +73,14 @@ describe('Battle levels and phases', () => {
     expect(battle.wave.config).toBe(TWO_LEVELS[1]);
   });
 
-  it('starts past the end of the table on the last level', () => {
+  it('starts past the end of the table on the escalated last level', () => {
     const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel: 5 });
     expect(battle.level).toBe(5);
-    expect(battle.wave.config).toBe(TWO_LEVELS[TWO_LEVELS.length - 1]);
+    expect(battle.wave.config).toEqual({
+      ...TWO_LEVELS[1]!,
+      firstDiveDelayTicks: 1_000_000 - 18,
+      diveIntervalTicks: 1_000_000 - 18,
+    });
   });
 
   it('enters cleared on the tick the last explosion ends', () => {
@@ -117,14 +121,18 @@ describe('Battle levels and phases', () => {
     expect(wave.formation.offset).toBe(0.25);
   });
 
-  it('repeats the last level past the end of the table', () => {
+  it('escalates the last level past the end of the table', () => {
     const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
     clearWave(battle);
     const second = battle.wave;
     clearWave(battle);
     expect(battle.level).toBe(3);
     expect(battle.phase).toBe('playing');
-    expect(battle.wave.config).toBe(TWO_LEVELS[1]);
+    expect(battle.wave.config).toEqual({
+      ...TWO_LEVELS[1]!,
+      firstDiveDelayTicks: 1_000_000 - 6,
+      diveIntervalTicks: 1_000_000 - 6,
+    });
     expect(battle.wave).not.toBe(second);
   });
 

@@ -4,14 +4,16 @@ import { overlaps } from './collisions';
 import { SHIP_HEIGHT, SHIP_SPEED, SHIP_WIDTH, SHIP_Y } from './ship';
 
 /**
- * Test-only evasion scenario of a striker (feature 003, task 016). Import from *.test.ts only.
- * turnY - the diver's y at which the feinting ship reverses: the middle of the window
- * "T = 8 escapes, T = 0 rams" (180 px/s: 120..130, 120 px/s: 130..140). One height for both
- * speeds gives no window.
+ * Test-only evasion scenario of a striker (feature 003, tasks 016-017). Import from *.test.ts only.
+ * turnY - the diver's y at which the feinting ship reverses: about the middle of the window
+ * "T = 8 escapes, T = 0 rams", measured with step 1 in task 017: 180 px/s 111..131,
+ * 150 px/s 120..137, 120 px/s 128..141, 90 px/s 136..146. No single height fits all speeds.
  */
 export const EVASION_CASES = [
   { diveSpeed: 180, turnY: 125 },
+  { diveSpeed: 150, turnY: 128 },
   { diveSpeed: 120, turnY: 135 },
+  { diveSpeed: 90, turnY: 141 },
 ] as const;
 
 /** A striker right after the peel (side = +1, enemy.test's afterPeel): x, y, vx of descend tick 1. */

@@ -275,7 +275,7 @@ describe('Enemy dive', () => {
     }
   });
 
-  it.each([60, 120])('descends straight down at %i px/s after the peel', (diveSpeed) => {
+  it.each([60, 90, 120])('descends straight down at %i px/s after the peel', (diveSpeed) => {
     const { enemy } = newEnemy();
     const env: EnemyEnv = { diveSpeed, targetX: null };
     enemy.startDive(diveOrder());
@@ -598,7 +598,7 @@ describe('Enemy aim', () => {
     expect(enemy.x).toBe(129);
   });
 
-  it.each([60, 120])('Y step at %i px/s does not depend on steering', (diveSpeed) => {
+  it.each([60, 90, 120])('Y step at %i px/s does not depend on steering', (diveSpeed) => {
     const enemy = afterPeel('drone', aimAt(0, diveSpeed));
     for (let i = 0; i < 5; i++) {
       const { x, y } = enemy;

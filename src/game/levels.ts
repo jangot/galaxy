@@ -11,7 +11,10 @@ export interface LevelConfig {
   readonly layout: readonly string[];
   /** Formation sway speed, px/s; px/tick must be 1/8, 1/4, 1/2 or a whole number (ADR 003). */
   readonly swaySpeed: number;
-  /** Dive (descend) speed, px/s; must be a whole number of px/tick (ADR 002). */
+  /**
+   * Dive (descend) speed, px/s; px/tick must be >= 1 and a multiple of 1/2 (ADR 004,
+   * extends ADR 002). Checked by isAllowedDiveSpeed.
+   */
   readonly diveSpeed: number;
   /** Ticks from the wave's start until the first dive (whole ticks, ADR 003). */
   readonly firstDiveDelayTicks: number;
@@ -66,7 +69,7 @@ export const LEVELS: readonly LevelConfig[] = [
   {
     layout: ['.SSSSSSSS.', 'SSSSSSSSSS', 'DDDDDDDDDD', 'DDDDDDDDDD'],
     swaySpeed: 15,
-    diveSpeed: 120,
+    diveSpeed: 90,
     firstDiveDelayTicks: 150,
     diveIntervalTicks: 150,
     maxSorties: 2,
@@ -86,7 +89,7 @@ export const LEVELS: readonly LevelConfig[] = [
   {
     layout: ['..RR..RR..', '.SSSSSSSS.', 'DDDDDDDDDD', 'DDDDDDDDDD'],
     swaySpeed: 30,
-    diveSpeed: 120,
+    diveSpeed: 150,
     firstDiveDelayTicks: 120,
     diveIntervalTicks: 90,
     maxSorties: 3,
@@ -115,21 +118,55 @@ export function isAllowedSpeed(pxPerSecond: number): boolean {
 }
 
 /**
- * 1-based; past the end of the table returns the last level.
+ * Dive speed rule (ADR 004): px/tick >= 1 and a whole number of half pixels
+ * (60, 90, 120, 150, 180 px/s). Only for the dive's Y; sway still uses isAllowedSpeed.
+ */
+export function isAllowedDiveSpeed(pxPerSecond: number): boolean {
+  const perTick = pxPerSecond * TICK_SECONDS;
+  return perTick >= 1 && Number.isInteger(perTick * 2);
+}
+
+/** Past the end of the table: dive timers shrink by this many ticks per level (0.1 s). */
+export const ESCALATION_STEP_TICKS = 6;
+/** Floor of diveIntervalTicks past the end of the table (0.5 s). */
+export const ESCALATION_MIN_INTERVAL_TICKS = 30;
+/** Floor of firstDiveDelayTicks past the end of the table (1 s). */
+export const ESCALATION_MIN_FIRST_DELAY_TICKS = 60;
+
+/** Shrinks a timer by k steps down to the floor; never raises a value already below it. */
+function escalate(last: number, floor: number, k: number): number {
+  return Math.min(last, Math.max(floor, last - ESCALATION_STEP_TICKS * k));
+}
+
+/**
+ * 1-based. Levels inside the table return their row as is. Past the end, k = level - length:
+ * the last row with diveIntervalTicks and firstDiveDelayTicks shrunk by ESCALATION_STEP_TICKS
+ * per level down to their floors (relative to the last row, so passive test tables stay
+ * passive). Pure: depends only on level and the table.
  * Throws if !Number.isInteger(level) || level < 1, or if the table is empty.
  */
 export function levelConfig(level: number, levels: readonly LevelConfig[] = LEVELS): LevelConfig {
   if (!Number.isInteger(level) || level < 1) {
     throw new Error(`Level must be an integer >= 1, got ${level}`);
   }
-  const config = levels[Math.min(level, levels.length) - 1];
-  if (config === undefined) throw new Error('Level table is empty');
-  return config;
+  const last = levels[levels.length - 1];
+  if (last === undefined) throw new Error('Level table is empty');
+  if (level <= levels.length) {
+    const config = levels[level - 1];
+    if (config === undefined) throw new Error(`Level ${level} is missing`);
+    return config;
+  }
+  const k = level - levels.length;
+  return {
+    ...last,
+    firstDiveDelayTicks: escalate(last.firstDiveDelayTicks, ESCALATION_MIN_FIRST_DELAY_TICKS, k),
+    diveIntervalTicks: escalate(last.diveIntervalTicks, ESCALATION_MIN_INTERVAL_TICKS, k),
+  };
 }
 
 /**
  * Parses the dev-only `?level=N` value. Returns N for a plain decimal integer >= 1,
- * otherwise 1. A level past the end of the table is fine: levelConfig repeats the last one.
+ * otherwise 1. A level past the end of the table is fine: levelConfig escalates the last one (faster dive timers).
  */
 export function parseStartLevel(value: string | null): number {
   if (value === null || !/^\d+$/.test(value)) return 1;
