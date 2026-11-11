@@ -3,19 +3,21 @@ import type { Input } from '../../engine/input';
 import type { Rng } from '../../engine/rng';
 import type { Scene } from '../../engine/scene';
 import { Starfield } from '../starfield';
+import { PlayScene } from './play-scene';
 
 /** Placeholder title screen: starfield + caption. Real menu comes in a separate task. */
 export class TitleScene implements Scene {
   private readonly starfield: Starfield;
   private ticks = 0;
 
-  constructor(rng: Rng) {
+  constructor(private readonly rng: Rng) {
     this.starfield = new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, rng);
   }
 
-  update(dt: number, _input: Input): void {
+  update(dt: number, input: Input): Scene | void {
     this.ticks++;
     this.starfield.update(dt);
+    if (input.pressed('start')) return new PlayScene(this.rng, this.starfield);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
