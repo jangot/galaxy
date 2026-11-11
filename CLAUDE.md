@@ -51,8 +51,21 @@
   Папка задачи: `{NNN}-{описание}` (напр. `003-player-ship`), внутри
   `description.md` → `analyze.md` → `plan.md`.
 
-Конвейер скилов: `/new-task` → `/analyze` → `/plan-implementation` → `/do` → `/fix-tests`
-→ `/commit` → `/pr-review`. `/chain` и `/do-chain` прогоняют стадии субагентами.
+Конвейер скилов: `/design-feature` → `/new-task` → `/analyze` → `/plan-implementation` → `/do`
+→ `/fix-tests` → `/commit` → `/pr-review`.
+
+`/design-feature` — проектирование фичи до постановки задач: агент `architect` пишет
+`design.md`, агент `developer` сверяет с кодом и пишет `dev-review*.md`; несколько
+раундов до согласования (агенты — в `.claude/agents/`). Итог — согласованный дизайн и
+нарезка на задачи. `/chain` и `/do-chain` прогоняют стадии субагентами.
 `/feature` и `/feature-review` — работа с записями фич.
+
+**Кто исполняет:** рабочие скилы `analyze`, `plan-implementation`, `do`, `fix-tests`,
+`commit` выполняет агент `developer` (`context: fork` в SKILL.md) — в изолированном
+контексте, без истории чата; вопросы он возвращает статусом NEEDS_INPUT, основная
+сессия задаёт их владельцу и перезапускает скил с ответами. В основной сессии
+остаются: `new-task` и `feature` (нужен контекст чата), оркестраторы `chain`,
+`do-chain`, `design-feature` (их шаги выполняют агенты), ревью — `pr-review`,
+`feature-review`.
 
 Коммиты — только по явной просьбе (скил `/commit` и есть такая просьба).
