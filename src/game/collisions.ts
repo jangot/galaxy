@@ -1,9 +1,17 @@
 import type { Enemy } from './enemy';
 import { ENEMY_SHOT_HEIGHT, ENEMY_SHOT_WIDTH } from './enemy-shot';
+import type { EnemyKind } from './levels';
 import type { Player } from './player';
 import { SHIP_HEIGHT, SHIP_WIDTH } from './ship';
 import { SHOT_HEIGHT, SHOT_WIDTH } from './shot';
 import type { Wave } from './wave';
+
+/** An enemy killed this tick; captured before kill() changes its state. */
+export interface Kill {
+  readonly kind: EnemyKind;
+  /** enemy.isOut at the moment of the hit (diving or returning); always true for a ram. */
+  readonly inFlight: boolean;
+}
 
 /** Axis-aligned rectangle, top-left corner + size, logical pixels. */
 export interface Rect {
@@ -36,14 +44,18 @@ export function overlaps(a: Rect, b: Rect): boolean {
  * Rule 1 goes first: an enemy shot down this tick is already exploding and cannot ram.
  * Rules 2 and 3 share one hit per tick: after a shot hit the ship can no longer be hit, so a
  * would-be rammer survives and flies on. Player and enemy shots never interact.
+ * Returns this tick's kills in the order they happened (rule 1 before rule 3, at most two);
+ * enemy shots kill no enemies.
  */
-export function resolveCollisions(player: Player, wave: Wave): void {
-  hitByPlayerShot(player, wave);
+export function resolveCollisions(player: Player, wave: Wave): readonly Kill[] {
+  const kills: Kill[] = [];
+  hitByPlayerShot(player, wave, kills);
   hitByEnemyShot(player, wave);
-  ram(player, wave);
+  ram(player, wave, kills);
+  return kills;
 }
 
-function hitByPlayerShot(player: Player, wave: Wave): void {
+function hitByPlayerShot(player: Player, wave: Wave, kills: Kill[]): void {
   const { shot } = player;
   if (!shot) return;
   const shotRect: Rect = { x: shot.x, y: shot.y, width: SHOT_WIDTH, height: SHOT_HEIGHT };
@@ -54,6 +66,8 @@ function hitByPlayerShot(player: Player, wave: Wave): void {
     if (target === null || enemy.y + enemy.height > target.y + target.height) target = enemy;
   }
   if (target) {
+    // Record before kill(): afterwards the enemy is exploding and isOut is false.
+    kills.push({ kind: target.kind, inFlight: target.isOut });
     target.kill();
     player.removeShot();
   }
@@ -71,12 +85,13 @@ function hitByEnemyShot(player: Player, wave: Wave): void {
   }
 }
 
-function ram(player: Player, wave: Wave): void {
+function ram(player: Player, wave: Wave, kills: Kill[]): void {
   if (!player.canBeHit) return;
   const ship = shipRect(player);
   for (const enemy of wave.enemies) {
     // isOut implies alive: exploding/dead and formation enemies never ram.
     if (!enemy.isOut || !overlaps(ship, enemy)) continue;
+    kills.push({ kind: enemy.kind, inFlight: true }); // a ram is always in flight: only isOut enemies ram
     enemy.kill();
     player.hit();
     return;

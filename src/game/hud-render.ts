@@ -10,6 +10,7 @@ import {
   LEVEL_ZONE,
   levelValueX,
   LIFE_ICON_STEP,
+  LIVES_ICON_SLOTS,
   LIVES_ZONE,
   SCORE_LABEL,
   SCORE_ZONE,
@@ -49,10 +50,11 @@ function drawLevel(ctx: CanvasRenderingContext2D, level: number): void {
   drawLabeled(ctx, LEVEL_ZONE, LEVEL_LABEL, text, levelValueX(text));
 }
 
-/** Icons from the zone's right edge leftwards; icon 0 is the rightmost. */
+/** Icons from the zone's right edge leftwards; icon 0 is the rightmost. At most LIVES_ICON_SLOTS. */
 function drawLives(ctx: CanvasRenderingContext2D, lives: number): void {
   const rightmostX = LIVES_ZONE.x + LIVES_ZONE.width - LIFE_ICON_SPRITE.width;
-  for (let i = 0; i < lives; i++) {
+  const count = Math.min(lives, LIVES_ICON_SLOTS);
+  for (let i = 0; i < count; i++) {
     drawSprite(ctx, LIFE_ICON_SPRITE, rightmostX - i * LIFE_ICON_STEP, LIVES_ZONE.y);
   }
 }

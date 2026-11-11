@@ -206,6 +206,45 @@ function returningAt(w: Wave, i: number, x: number, y: number): Enemy {
   return enemy;
 }
 
+describe('resolveCollisions kills', () => {
+  it('returns no kills without a hit', () => {
+    expect(resolveCollisions(new Player(), wave(['D']))).toEqual([]);
+    const { player } = playerWithShot(100);
+    expect(resolveCollisions(player, wave(['D']))).toEqual([]);
+  });
+
+  it('reports a formation kill', () => {
+    const w = wave(['D']);
+    const { player } = playerWithShot(38);
+    expect(resolveCollisions(player, w)).toEqual([{ kind: 'drone', inFlight: false }]);
+  });
+
+  it.each([
+    ['S', 'striker'],
+    ['R', 'raider'],
+  ] as const)('reports the kind of the enemy (%s -> %s)', (c, kind) => {
+    const w = wave([c]);
+    w.enemies[0]!.x = 122;
+    w.enemies[0]!.y = 100;
+    const { player } = playerWithShot(104);
+    expect(resolveCollisions(player, w)).toEqual([{ kind, inFlight: false }]);
+  });
+
+  it('reports a diving kill as in flight', () => {
+    const w = wave(['D']);
+    divingAt(w, 0, 122, 100);
+    const { player } = playerWithShot(104);
+    expect(resolveCollisions(player, w)).toEqual([{ kind: 'drone', inFlight: true }]);
+  });
+
+  it('reports a returning kill as in flight', () => {
+    const w = wave(['D']);
+    returningAt(w, 0, 122, 100);
+    const { player } = playerWithShot(104);
+    expect(resolveCollisions(player, w)).toEqual([{ kind: 'drone', inFlight: true }]);
+  });
+});
+
 // The default ship: x = 120, y = 208, 15 x 16 (120 … 135 x 208 … 224). A drone is 11 x 8.
 describe('resolveCollisions ram', () => {
   it('a diving enemy rams the ship without a player shot', () => {
@@ -311,10 +350,36 @@ describe('resolveCollisions ram', () => {
     // 203 … 211 overlaps the ship; the shot (column 127, 204 … 208) is inside the enemy.
     const enemy = divingAt(w, 0, 122, 203);
     const { player } = playerWithShot(204);
-    resolveCollisions(player, w);
+    const kills = resolveCollisions(player, w);
+    expect(kills).toEqual([{ kind: 'drone', inFlight: true }]);
     expect(enemy.state).toBe('exploding');
     expect(player.shot).toBeNull();
     expect(player.state).toBe('active');
+  });
+
+  it('reports a ram as an in-flight kill', () => {
+    const w = wave(['S']);
+    divingAt(w, 0, 122, 205);
+    const player = new Player();
+    expect(resolveCollisions(player, w)).toEqual([{ kind: 'striker', inFlight: true }]);
+    expect(player.state).toBe('down');
+  });
+
+  it('reports a shot kill and a ram in one tick, shot first', () => {
+    const w = wave(['RD']);
+    const shotDown = w.enemies[0]!;
+    shotDown.x = 122;
+    shotDown.y = 100;
+    // The shot (y 104 … 108) is far above the rammer (y 205 …).
+    const rammer = divingAt(w, 1, 122, 205);
+    const { player } = playerWithShot(104);
+    expect(resolveCollisions(player, w)).toEqual([
+      { kind: 'raider', inFlight: false },
+      { kind: 'drone', inFlight: true },
+    ]);
+    expect(shotDown.state).toBe('exploding');
+    expect(rammer.state).toBe('exploding');
+    expect(player.state).toBe('down');
   });
 });
 
@@ -341,7 +406,7 @@ describe('resolveCollisions enemy shots', () => {
     const w = waveWithShots(1);
     w.shots[0]!.y = 205; // 205 … 209 crosses 208
     const player = new Player();
-    resolveCollisions(player, w);
+    expect(resolveCollisions(player, w)).toEqual([]); // enemy shots kill no enemies
     expect(w.shots).toHaveLength(0);
     expect(player.state).toBe('down');
   });

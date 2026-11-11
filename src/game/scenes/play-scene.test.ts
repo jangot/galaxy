@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_WIDTH, TICK_SECONDS } from '../../config';
 import { Input } from '../../engine/input';
 import { createRng } from '../../engine/rng';
-import { Battle } from '../battle';
+import type { Scene } from '../../engine/scene';
+import { Battle, GAME_OVER_DELAY_TICKS } from '../battle';
+import { recorder } from '../canvas-test-utils';
+import { drawGameOver } from '../game-over-render';
 import { Player } from '../player';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y, Ship } from '../ship';
 import { SHOT_HEIGHT, SHOT_SPEED } from '../shot';
@@ -17,6 +20,34 @@ const TICKS_ON_SCREEN = (SHIP_Y - SHOT_HEIGHT) / (SHOT_SPEED * TICK_SECONDS);
 /** One enemy far from the ship's shot column, so ship and shot tests are not disturbed by hits. */
 function newScene(): PlayScene {
   return new PlayScene(createRng(1), undefined, { levels: ONE_CORNER_ENEMY });
+}
+
+/** Quick game over: one life, a manual hit, then the delay. */
+function overScene(exit?: () => Scene): PlayScene {
+  const scene = new PlayScene(
+    createRng(1),
+    undefined,
+    { levels: ONE_CORNER_ENEMY, lives: 1 },
+    exit,
+  );
+  scene.battle.player.hit();
+  step(scene, new Input(), GAME_OVER_DELAY_TICKS);
+  expect(scene.battle.phase).toBe('over');
+  return scene;
+}
+
+/** A stub scene and a spy factory returning it. */
+function spyExit(): { exit: () => Scene; target: Scene; calls: () => number } {
+  const target: Scene = { update: () => undefined, render: () => undefined };
+  let n = 0;
+  return {
+    exit: () => {
+      n++;
+      return target;
+    },
+    target,
+    calls: () => n,
+  };
 }
 
 describe('PlayScene', () => {
@@ -151,5 +182,72 @@ describe('PlayScene', () => {
     step(scene, input, 1);
     expect(scene.battle.player.shot).toBeNull();
     expect(enemy.state).toBe('exploding');
+  });
+
+  describe('game over', () => {
+    it('leaves to the exit scene on start', () => {
+      const spy = spyExit();
+      const scene = overScene(spy.exit);
+      const input = new Input();
+      input.press('start');
+      expect(step(scene, input)).toBe(spy.target);
+      expect(spy.calls()).toBe(1);
+    });
+
+    it('counts start on the very tick of entering over', () => {
+      const spy = spyExit();
+      const scene = new PlayScene(
+        createRng(1),
+        undefined,
+        { levels: ONE_CORNER_ENEMY, lives: 1 },
+        spy.exit,
+      );
+      scene.battle.player.hit();
+      const input = new Input();
+      step(scene, input, GAME_OVER_DELAY_TICKS - 1);
+      expect(scene.battle.phase).toBe('playing');
+      input.press('start');
+      expect(step(scene, input)).toBe(spy.target);
+      expect(scene.battle.phase).toBe('over');
+      expect(scene.battle.phaseTicks).toBe(0);
+    });
+
+    it('ignores start while playing', () => {
+      const spy = spyExit();
+      const scene = new PlayScene(createRng(1), undefined, { levels: ONE_CORNER_ENEMY }, spy.exit);
+      const input = new Input();
+      input.press('start');
+      expect(step(scene, input)).toBe(scene);
+      expect(scene.battle.phase).toBe('playing');
+      expect(spy.calls()).toBe(0);
+    });
+
+    it('stays on the caption without an exit', () => {
+      const scene = overScene();
+      const input = new Input();
+      input.press('start');
+      expect(step(scene, input)).toBe(scene);
+    });
+
+    it('draws the caption last in over', () => {
+      const scene = overScene();
+      const expected = recorder();
+      drawGameOver(expected.ctx, scene.battle.phaseTicks);
+      const n = expected.calls.length;
+      expect(n).toBeGreaterThan(0);
+      const { ctx, calls } = recorder();
+      scene.render(ctx);
+      expect(calls.slice(-n)).toEqual(expected.calls);
+    });
+
+    it('does not draw the caption while playing', () => {
+      const scene = newScene();
+      const expected = recorder();
+      drawGameOver(expected.ctx, scene.battle.phaseTicks);
+      const n = expected.calls.length;
+      const { ctx, calls } = recorder();
+      scene.render(ctx);
+      expect(calls.slice(-n)).not.toEqual(expected.calls);
+    });
   });
 });
