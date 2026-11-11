@@ -1,6 +1,6 @@
 # Фича 002: Враги и уровни
 
-**Статус:** в работе — ждёт приёмки (013: спрайт raider, баланс)
+**Статус:** готова
 
 ## Суть
 
@@ -40,7 +40,7 @@
 
 ## Задачи
 
-- [005-battle-extract](../../tasks/tasks/005-battle-extract/description.md) — выделение Battle и battle-render (рефакторинг)
+- [005-battle-extract](../../tasks/tasks-done/005-battle-extract/description.md) — выделение Battle и battle-render (рефакторинг)
 - [006-static-formation](../../tasks/tasks-done/006-static-formation/description.md) — статичный строй drone/striker
 - [007-formation-sway](../../tasks/tasks-done/007-formation-sway/description.md) — покачивание строя, ADR 003
 - [008-enemy-hits-levels](../../tasks/tasks-done/008-enemy-hits-levels/description.md) — сбивание врагов и уровни
@@ -48,7 +48,7 @@
 - [010-enemy-aim](../../tasks/tasks-done/010-enemy-aim/description.md) — прицеливание fixed/track
 - [011-player-ram](../../tasks/tasks-done/011-player-ram/description.md) — поражение игрока тараном
 - [012-enemy-shots](../../tasks/tasks-done/012-enemy-shots/description.md) — стрельба пикирующих
-- [013-raiders](../../tasks/tasks/013-raiders/description.md) — специальные враги raider
+- [013-raiders](../../tasks/tasks-done/013-raiders/description.md) — специальные враги raider
 
 ## Заметки владельца
 

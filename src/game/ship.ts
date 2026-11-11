@@ -5,7 +5,7 @@ import { SHOT_HEIGHT, SHOT_WIDTH, Shot } from './shot';
 /** Ship size is derived from its sprite so the hitbox never drifts from the picture. */
 export const SHIP_WIDTH = SHIP_SPRITE.width;
 export const SHIP_HEIGHT = SHIP_SPRITE.height;
-/** Top edge of the ship; the bottom 16 px below it are reserved for the lives HUD. */
+/** Top edge of the ship; the strip below it stays empty (lives are shown in the top HUD). */
 export const SHIP_Y = 208;
 /** Horizontal speed in px/s. Must be a whole number of px per tick (ADR 002): 2 px/tick. */
 export const SHIP_SPEED = 120;

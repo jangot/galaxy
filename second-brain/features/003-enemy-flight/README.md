@@ -1,6 +1,6 @@
 # Фича 003: Полёт пикирующих врагов
 
-**Статус:** в работе — ждёт приёмки
+**Статус:** готова
 
 ## Суть
 
@@ -54,8 +54,8 @@
 
 ## Задачи
 
-| Задача                                                                      | Суть                                                              | Зависит от |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------- |
-| [014-steering-model](../../tasks/tasks/014-steering-model/description.md)   | модель руления `steering.ts`, профили повторяют текущее поведение | —          |
-| [015-drone-retarget](../../tasks/tasks/015-drone-retarget/description.md)   | `drone` переприцеливается раз в 30 тиков                          | 014        |
-| [016-striker-inertia](../../tasks/tasks/016-striker-inertia/description.md) | инерция `striker`, `turnTicks = 8`                                | 014        |
+| Задача                                                                           | Суть                                                              | Зависит от |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------- |
+| [014-steering-model](../../tasks/tasks-done/014-steering-model/description.md)   | модель руления `steering.ts`, профили повторяют текущее поведение | —          |
+| [015-drone-retarget](../../tasks/tasks-done/015-drone-retarget/description.md)   | `drone` переприцеливается раз в 30 тиков                          | 014        |
+| [016-striker-inertia](../../tasks/tasks-done/016-striker-inertia/description.md) | инерция `striker`, `turnTicks = 8`                                | 014        |
