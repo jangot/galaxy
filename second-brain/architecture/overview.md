@@ -33,8 +33,21 @@
   разной длины, ключ `.` в палитре, символ вне палитры) и `drawSprite()` — `fillRect` 1×1
   на каждый непрозрачный пиксель; координаты целые (`Math.floor` — в вызывающем коде).
 - `art.ts` — данные пиксель-арта: `SHIP_SPRITE` 15×16 (разбирается при загрузке модуля —
-  ошибка формата роняет импорт и ловится тестами) и `SHOT_COLOR` (белый; выстрел —
-  прямоугольник, не спрайт).
+  ошибка формата роняет импорт и ловится тестами), `SHOT_COLOR` (белый; выстрел —
+  прямоугольник, не спрайт), `LIFE_ICON_SPRITE` 7×8 (иконка жизни для HUD — уменьшенный
+  силуэт корабля в палитре корабля; предел 8×8 — `LIFE_ICON_MAX_SIZE` в `hud.ts`,
+  проверяется тестом) и цвета панели `HUD_LABEL_COLOR` (красный, как `R` корабля) /
+  `HUD_VALUE_COLOR` (белый).
+- `font.ts` / `font-art.ts` — моноширинный пиксельный шрифт (NES-стиль): глифы 7×7
+  в клетке 8×8 (`GLYPH_WIDTH`, `GLYPH_HEIGHT`, `CHAR_ADVANCE`), набор `0–9`, `A–Z`,
+  пробел. Данные — строки `#`/`.` в `font-art.ts` (`FONT_GLYPHS`, под `// prettier-ignore`,
+  чтобы глифы оставались по строке на ряд), разбор через `parseSprite` в `parseFont` при
+  загрузке модуля (`FONT`; неверный размер глифа или ошибка формата роняет импорт).
+  `textWidth(text)` = `text.length * CHAR_ADVANCE` (хвостовой зазор 1 px намеренно);
+  `drawText(ctx, text, x, y, color)` — один `fillStyle` на вызов, `fillRect` 1×1 на пиксель
+  маски (цвет из глифа не читается), координаты целые. Оба бросают на символе без глифа.
+  Шрифт в `game/`, не в движке (строится на `sprite.ts`). Используется верхней
+  панелью (`hud-render.ts`).
 - `shot.ts` — `Shot`: позиция — левый верхний угол, `SHOT_WIDTH × SHOT_HEIGHT = 1×4`,
   `SHOT_SPEED = 240` px/с (4 px/тик); `x` фиксирован после вылета (за кораблём не
   следует), `update(dt)` — движение вверх, `isOffscreen` — `y + SHOT_HEIGHT <= 0`.
@@ -46,7 +59,7 @@
   Импортирует `config`.
 - `ship.ts` — `Ship`: позиция — левый верхний угол, старт по центру по X
   (`SHIP_START_X = 120` — точка старта и возрождения),
-  `SHIP_Y = 208` (под кораблём 16 px под HUD жизней); `SHIP_WIDTH`/`SHIP_HEIGHT`
+  `SHIP_Y = 208` (полоса под кораблём пустая; жизни — в верхней панели); `SHIP_WIDTH`/`SHIP_HEIGHT`
   выводятся из спрайта. Движение — `update(dt, move)` с `MoveDir` (`-1 | 0 | 1`):
   `SHIP_SPEED = 120` px/с (2 px/тик), без инерции, зажим `[0, SCREEN_WIDTH - SHIP_WIDTH]`;
   шаг за край обрезается ровно до края. `spawnShot()` — новый `Shot` по центру носа,
@@ -219,13 +232,27 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `EXPLOSION_TICKS` тиков, затем ничего; `invulnerable` — мигание `BLINK_TICKS = 4`
   (4 тика виден, 4 скрыт; виден в тике входа). Выстрел игрока рисуется в любом
   состоянии корабля.
+- `hud.ts` — модель панели без canvas: `HudView { level, score, lives }` (`lives` — общее
+  число, включая корабль на поле), `hudView(battle)` (уровень — `battle.level`; счёт и
+  жизни — заглушки `PLACEHOLDER_SCORE = 0`, `PLACEHOLDER_LIVES = 3`), `formatScore`
+  (6 цифр с ведущими нулями, длиннее — целиком), `formatLevel`; раскладка:
+  `HUD_HEIGHT = 24`, `HUD_MARGIN_X = 8`, строки `HUD_LABEL_Y = 4` / `HUD_VALUE_Y = 14`,
+  `HudZone`, `SCORE_ZONE` (8, 4, 48×17), `LEVEL_ZONE` (108, 4, 40×17; номер — по центру
+  под подписью: `levelValueX(text)` = `x + floor((40 − textWidth(text)) / 2)`, +16 для
+  1 цифры, +12 для 2; влезает до 5 цифр; счёт — по левому краю), `LIVES_ZONE` (200, 14, 48×8; иконки от правого края, шаг
+  `LIFE_ICON_STEP = 10`, `LIVES_ICON_SLOTS = 5`, предел иконки `LIFE_ICON_MAX_SIZE = 8`),
+  `HUD_ZONES` — для теста непересечения. Новая секция = поле `HudView` + зона + `drawX`.
+- `hud-render.ts` — `drawHud(ctx, view)`: секции счёт → уровень → жизни, каждая рисует
+  только в своей зоне; подписи `HUD_LABEL_COLOR`, значения `HUD_VALUE_COLOR` через
+  `drawText`, иконки — `drawSprite` (своей палитрой); фон не рисует.
 - `canvas-test-utils.ts` — только для тестов: `recorder()` — фейковый ctx, пишет
   `fillRect` с текущим `fillStyle` (`FillCall`); используют `sprite.test.ts`,
-  `battle-render.test.ts`.
+  `battle-render.test.ts`, `font.test.ts`, `hud-render.test.ts`.
 - `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?)`, `opts: BattleOptions`
   передаются в `Battle` как есть. Игровая сцена: держит `readonly battle` (открыт для тестов,
   тесты ходят через `scene.battle.player`); `update` — звёзды →
-  `battle.update(dt, readIntent(input))`. Слои: заливка → звёзды → `drawBattle`.
+  `battle.update(dt, readIntent(input))`. Слои: заливка → звёзды → `drawBattle` →
+  `drawHud(hudView(battle))` (панель последней, без фона).
   `readIntent` остаётся в сцене — `Battle` ввод не знает. `Starfield` принимает снаружи
   или создаёт из `rng`. `Battle` создаётся в конструкторе с отдельным `Rng`: сначала
   звёзды, потом seed боя `createRng(Math.floor(rng() * 2 ** 32))` — фон не влияет на бой.
@@ -234,7 +261,8 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `update` только через него.
 
 Граф импортов: `title-scene → {play-scene, starfield}`,
-`play-scene → {starfield, battle, battle-render, player, engine/rng}`,
+`play-scene → {starfield, battle, battle-render, hud, hud-render, player, engine/rng}`,
+`hud → {config, font}` (`Battle` — type), `hud-render → {art, font, hud, sprite}` (`HudView`, `HudZone` — type),
 `battle → {player, ship, wave, levels, collisions}` (`Rng`, `LevelConfig`, `PlayerIntent` — type),
 `collisions → {ship, shot, enemy-shot}` (`Player`, `Wave`, `Enemy` — type),
 `battle-render → {art, enemy, enemy-art, enemy-shot, sprite, shot, ship}` (`Battle`, `Enemy`, `Player` — type),
@@ -243,7 +271,7 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
 `attack-director → {engine/rng, formation}` (`Rng`, `DiveOrder`, `Enemy`, `LevelConfig` — type),
 `enemy → {config, enemy-art, ship, steering}` (`Formation`, `EnemyKind`, `Slot`, `Sprite`, `SteerSpec` — type), `steering` — без импортов, `formation → config`, `enemy-art → sprite`,
 `levels → config`, `player → ship` (`Ship`, `SHIP_START_X`; `Input`, `Shot`, `MoveDir` — `import type`),
-`ship → {config, art, shot}`, `art → sprite`, `shot` — без импортов, `enemy-shot → config`;
+`ship → {config, art, shot}`, `art → sprite`, `font → {sprite, font-art}`, `font-art` — без импортов, `shot` — без импортов, `enemy-shot → config`;
 `scene-test-utils → config` (типы `Scene`/`Input` — `import type`); `canvas-test-utils` —
 без импортов, `test-levels` (`LevelConfig`, `DiveOrder` — type) — оба только из `*.test.ts`; `test-evasion → {config, collisions, ship}` (`Rect` — type), только из `*.test.ts`. Циклов
 нет; `engine` ничего не знает о `game`.

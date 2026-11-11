@@ -5,10 +5,12 @@ import type { Scene } from '../../engine/scene';
 import type { BattleOptions } from '../battle';
 import { Battle } from '../battle';
 import { drawBattle } from '../battle-render';
+import { hudView } from '../hud';
+import { drawHud } from '../hud-render';
 import { readIntent } from '../player';
 import { Starfield } from '../starfield';
 
-/** Gameplay screen: starfield background plus the battle. */
+/** Gameplay screen: starfield background, the battle and the HUD on top. */
 export class PlayScene implements Scene {
   /** Exposed for tests. */
   readonly battle: Battle;
@@ -32,5 +34,6 @@ export class PlayScene implements Scene {
     ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     this.starfield.render(ctx);
     drawBattle(ctx, this.battle);
+    drawHud(ctx, hudView(this.battle)); // last, no background: text over the battle
   }
 }

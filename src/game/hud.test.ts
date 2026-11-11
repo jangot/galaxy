@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest';
+import { SCREEN_WIDTH } from '../config';
+import { createRng } from '../engine/rng';
+import { LIFE_ICON_SPRITE } from './art';
+import { Battle } from './battle';
+import { CHAR_ADVANCE, GLYPH_HEIGHT, textWidth } from './font';
+import {
+  formatLevel,
+  formatScore,
+  HUD_HEIGHT,
+  HUD_LABEL_Y,
+  HUD_VALUE_Y,
+  HUD_ZONES,
+  hudView,
+  LEVEL_LABEL,
+  LEVEL_ZONE,
+  levelValueX,
+  LIFE_ICON_MAX_SIZE,
+  LIFE_ICON_STEP,
+  LIVES_ICON_SLOTS,
+  LIVES_ZONE,
+  PLACEHOLDER_LIVES,
+  PLACEHOLDER_SCORE,
+  SCORE_DIGITS,
+  SCORE_LABEL,
+  SCORE_ZONE,
+} from './hud';
+import { TWO_LEVELS } from './test-levels';
+
+describe('formatting', () => {
+  it('pads the score to six digits and keeps longer numbers whole', () => {
+    expect(formatScore(0)).toBe('000000');
+    expect(formatScore(123)).toBe('000123');
+    expect(formatScore(1234567)).toBe('1234567');
+  });
+
+  it('prints the level as a plain number', () => {
+    expect(formatLevel(1)).toBe('1');
+    expect(formatLevel(12)).toBe('12');
+  });
+});
+
+describe('hudView', () => {
+  it.each([1, 3])('shows the battle level %i with placeholder score and lives', (startLevel) => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel });
+    expect(hudView(battle)).toEqual({
+      level: startLevel,
+      score: PLACEHOLDER_SCORE,
+      lives: PLACEHOLDER_LIVES,
+    });
+  });
+
+  it('uses score 0 and 3 lives as placeholders', () => {
+    expect(PLACEHOLDER_SCORE).toBe(0);
+    expect(PLACEHOLDER_LIVES).toBe(3);
+  });
+});
+
+describe('layout', () => {
+  it('keeps every zone on integer coordinates inside the HUD strip', () => {
+    for (const z of HUD_ZONES) {
+      for (const v of [z.x, z.y, z.width, z.height]) expect(Number.isInteger(v)).toBe(true);
+      expect(z.x).toBeGreaterThanOrEqual(0);
+      expect(z.y).toBeGreaterThanOrEqual(0);
+      expect(z.x + z.width).toBeLessThanOrEqual(SCREEN_WIDTH);
+      expect(z.y + z.height).toBeLessThanOrEqual(HUD_HEIGHT);
+    }
+  });
+
+  it('has no overlapping zones', () => {
+    for (let i = 0; i < HUD_ZONES.length; i++) {
+      for (let j = i + 1; j < HUD_ZONES.length; j++) {
+        const a = HUD_ZONES[i]!;
+        const b = HUD_ZONES[j]!;
+        const overlap =
+          a.x < b.x + b.width &&
+          b.x < a.x + a.width &&
+          a.y < b.y + b.height &&
+          b.y < a.y + a.height;
+        expect(overlap, `zones ${i} and ${j}`).toBe(false);
+      }
+    }
+  });
+
+  it('stays above the highest enemy pixel', () => {
+    // Free strip above the formation: the highest enemy pixel is an explosion at the peel
+    // apex, top y = 29 (drone row 0: slot y 34, 4 px up, frame 9 px tall centered -> -1).
+    // <= 28 keeps at least 1 px between the HUD and it; a limit for future sections too.
+    expect(HUD_HEIGHT).toBeLessThanOrEqual(28);
+  });
+
+  it('keeps the label row above the value row', () => {
+    expect(HUD_LABEL_Y + GLYPH_HEIGHT).toBeLessThanOrEqual(HUD_VALUE_Y);
+  });
+});
+
+describe('capacity', () => {
+  it('fits the score label and six digits', () => {
+    expect(SCORE_ZONE.width).toBeGreaterThanOrEqual(textWidth(SCORE_LABEL));
+    expect(SCORE_ZONE.width).toBeGreaterThanOrEqual(SCORE_DIGITS * CHAR_ADVANCE);
+  });
+
+  it('fits the level label', () => {
+    expect(LEVEL_ZONE.width).toBeGreaterThanOrEqual(textWidth(LEVEL_LABEL));
+  });
+
+  it.each([1, 9, 10, 99, 999, 99999])('keeps the centered level %i inside its zone', (level) => {
+    const text = formatLevel(level);
+    const x = levelValueX(text);
+    expect(Number.isInteger(x)).toBe(true);
+    expect(x).toBeGreaterThanOrEqual(LEVEL_ZONE.x);
+    expect(x + textWidth(text)).toBeLessThanOrEqual(LEVEL_ZONE.x + LEVEL_ZONE.width);
+  });
+
+  it.each([
+    ['score', SCORE_ZONE],
+    ['level', LEVEL_ZONE],
+  ])('%s zone spans both text rows', (_name, zone) => {
+    expect(zone.y).toBeLessThanOrEqual(HUD_LABEL_Y);
+    expect(zone.y + zone.height).toBeGreaterThanOrEqual(HUD_VALUE_Y + GLYPH_HEIGHT);
+  });
+
+  it('fits all lives icon slots', () => {
+    expect(LIVES_ZONE.width).toBeGreaterThanOrEqual(
+      (LIVES_ICON_SLOTS - 1) * LIFE_ICON_STEP + LIFE_ICON_MAX_SIZE,
+    );
+    expect(LIVES_ZONE.height).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
+  });
+});
+
+describe('lives icon', () => {
+  it('stays within the size limit and does not overlap its neighbor', () => {
+    expect(LIFE_ICON_SPRITE.width).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
+    expect(LIFE_ICON_SPRITE.height).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
+    expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(LIFE_ICON_STEP);
+    expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(8); // owner's decision: icon at most 8×8
+  });
+});
