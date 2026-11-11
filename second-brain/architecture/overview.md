@@ -23,9 +23,11 @@
 ## Игра
 
 - `starfield.ts` — фон из звёзд.
-- `scenes/title-scene.ts` — заглушка титульного экрана; по `start` (Enter) возвращает
-  `PlayScene`, передавая свой `rng` и тот же экземпляр `Starfield` — звёзды
-  продолжаются без скачка.
+- `scenes/title-scene.ts` — `TitleScene(rng, startLevel?)`, заглушка титульного экрана;
+  по `start` (Enter) возвращает `PlayScene`, передавая свой `rng`, тот же экземпляр
+  `Starfield` — звёзды продолжаются без скачка — и `{ startLevel }`.
+- Точка входа `main.ts`: в dev-сборке (`import.meta.env.DEV`) читает `?level=N` через
+  `parseStartLevel` и передаёт в `TitleScene`; в прод-сборке — `undefined` (уровень 1).
 - `sprite.ts` — формат спрайта: массив строк + палитра, `.` — прозрачный пиксель.
   Чистый `parseSprite()` (бросает на ошибках формата: нет строк, нулевая ширина, строки
   разной длины, ключ `.` в палитре, символ вне палитры) и `drawSprite()` — `fillRect` 1×1
@@ -37,7 +39,13 @@
   `SHOT_SPEED = 240` px/с (4 px/тик); `x` фиксирован после вылета (за кораблём не
   следует), `update(dt)` — движение вверх, `isOffscreen` — `y + SHOT_HEIGHT <= 0`.
   Не зависит от других модулей игры.
-- `ship.ts` — `Ship`: позиция — левый верхний угол, старт по центру по X,
+- `enemy-shot.ts` — `EnemyShot(x, y)`: отдельный класс вражеского выстрела, позиция — левый
+  верхний угол, `ENEMY_SHOT_WIDTH × ENEMY_SHOT_HEIGHT = 1×4`, `ENEMY_SHOT_SPEED = 240` px/с
+  (4 px/тик, быстрее любого `diveSpeed` — выстрел сразу отрывается от носа врага); `x`
+  фиксирован после вылета, `update(dt)` — движение вниз, `isOffscreen` — `y >= SCREEN_HEIGHT`.
+  Импортирует `config`.
+- `ship.ts` — `Ship`: позиция — левый верхний угол, старт по центру по X
+  (`SHIP_START_X = 120` — точка старта и возрождения),
   `SHIP_Y = 208` (под кораблём 16 px под HUD жизней); `SHIP_WIDTH`/`SHIP_HEIGHT`
   выводятся из спрайта. Движение — `update(dt, move)` с `MoveDir` (`-1 | 0 | 1`):
   `SHIP_SPEED = 120` px/с (2 px/тик), без инерции, зажим `[0, SCREEN_WIDTH - SHIP_WIDTH]`;
@@ -47,28 +55,188 @@
   где игра читает клавиатуру для игрока (обе стороны зажаты — `move = 0`; `fire` —
   `pressed`, только тик нажатия). `Player` — агрегат «корабль + единственный выстрел»:
   `ship`, `get shot(): Shot | null`, `update(dt, intent)`. Автомат выстрела:
-  Ready (`shot === null`) → огонь → InFlight → ушёл за верх → Ready; нажатие во время
-  полёта игнорируется и не буферизуется. Порядок тика: движение корабля → полёт
+  Ready (`shot === null`) → огонь → InFlight → ушёл за верх → Ready; InFlight →
+  попадание (`removeShot()`) → Ready; нажатие во время полёта игнорируется и не
+  буферизуется. Выстрел, снятый попаданием, освобождает слот со следующего тика (огонь в
+  `update` идёт до коллизий). Порядок тика: движение корабля → полёт
   выстрела и удаление ушедшего → огонь (слот освобождается в том же тике, новый выстрел
   вылетает из уже сдвинутого корабля и в тике вылета не движется).
-- `scenes/play-scene.ts` — игровая сцена: звёздный фон, корабль и выстрел
-  (`readonly player`, открыт для тестов); `update` → `player.update(dt, readIntent(input))`.
-  Слои: заливка → звёзды → выстрел → корабль. `Starfield` принимает снаружи
-  или создаёт из `rng`.
+  Автомат корабля (`ShipState`): `active` → `hit()` → `down` → `DOWN_TICKS = 60` (1 с) →
+  `invulnerable` → `INVULNERABLE_TICKS = 120` (2 с) → `active`. Геттеры `state`,
+  `stateTicks`, `canBeHit` (только `active`), `canBeTargeted` (всё, кроме `down`).
+  `hit()` действует только из `active` (в `down`/`invulnerable` игнорируется, таймер не
+  сбрасывает) и не снимает выстрел в полёте. Правило тиков — как у `Enemy`: вход в
+  состояние ставит `stateTicks = 0`; `update` — счёт тика → переход по таймеру →
+  поведение нового состояния. В `down` ввод игнорируется, летит только выстрел; в тике
+  возрождения корабль ставится в `SHIP_START_X`, и intent этого тика уже применяется
+  (движение и огонь); в `invulnerable` корабль управляем.
+- `levels.ts` — `EnemyKind` (`drone | striker | raider`), `LayoutChar` (`D`, `S`, `R`, `.`),
+  `LevelConfig { layout, swaySpeed, diveSpeed, firstDiveDelayTicks, diveIntervalTicks,
+maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpeed` — px/с, целые px/тик, ADR 002;
+  таймеры — целые тики; `maxSorties` — сколько вылетов одновременно; `diverShots` — выстрелов
+  за вылет у `drone`/`striker`, целое ≥ 0, 0 — не стреляют; у уровней 1–5 — 0/0/1/2/2;
+  `raiderShots` — выстрелов за вылет у каждого `raider`, целое ≥ 0, > 0 при `R` в раскладке; у
+  уровней 1–3 — 0, у 4/5 — 2/3; `maxSorties` — группа `raider` считается одним вылетом),
+  `Slot { row, col, kind, group }` (`group` — номер непрерывной серии `R` в строке, сквозной
+  по раскладке row-major: 0, 1, …; у остальных `null`),
+  `Layout { rows, cols, slots }` (слоты row-major: сверху вниз, слева направо),
+  `FORMATION_MAX_COLS = 11`, `LEVELS` — пять уровней (уровень 1: `.SSSSSSSS.` + два ряда
+  `DDDDDDDDDD`, пике 60, вылеты через 180/180 тиков, 1 в полёте; уровень 2: `.SSSSSSSS.` +
+  `SSSSSSSSSS` + два ряда `DDDDDDDDDD`, пике 120, 150/150, 2 в полёте; уровень 3 — раскладка
+  уровня 2, `swaySpeed = 30`, пике 120, 120/120, 2 в полёте; уровень 4: `..RR..RR..` +
+  `.SSSSSSSS.` + два ряда `DDDDDDDDDD` (32 слота), `swaySpeed = 30`, пике 120, 120/90, 3 в
+  полёте; уровень 5: `.RRR..RRR.` + `.SSSSSSSS.` + два ряда `DDDDDDDDDD` (34 слота), пике 180,
+  90/60, 3 в полёте; у 1–2 `swaySpeed = 15`). Правила таблицы (`R` только в верхнем ряду,
+  группа из 2–3) проверяет тест `LEVELS`, не парсер.
+  `isAllowedSpeed(pxPerSecond)` — px/тик целое ≥ 1 или ровно `1/2`, `1/4`, `1/8` (ADR 003).
+  `levelConfig(n, levels?)` —
+  целое ≥ 1, за концом таблицы — последний уровень, пустая таблица — ошибка.
+  `parseLayout()` бросает: нет строк, строки разной длины, неизвестный символ, ширина > 11, ни одного врага. `parseStartLevel(value)` — разбор dev-параметра
+  `?level=N`: только десятичные цифры и целое ≥ 1, иначе 1. Импортирует `config`
+  (`TICK_SECONDS`).
+- `formation.ts` — `Formation(cols, rows, swaySpeed)`: ячейка `CELL_WIDTH × CELL_HEIGHT = 16×12`,
+  верх строя `FORMATION_TOP = 32`, строй центрирован по X (`baseX` — private);
+  `slotX(col, width)` / `slotY(row, height)` — левый верхний угол спрайта, центрированного
+  в ячейке. Покачивание: `SWAY_RANGE = 16` (видимый размах), `offset` — getter, дробный,
+  старт 0, вправо; `update(dt)` — сдвиг на `swaySpeed * dt` и разворот у краёв
+  (`maxOffset = 16 + max(0, 1 - step)`, `min = -16` — после `Math.floor` оба края видны
+  одинаково долго). `slotX` включает `offset`, `slotY` — нет.
+- `enemy-art.ts` — `DRONE_SPRITE` 11×8 (зелёный), `STRIKER_SPRITE` 13×9 (синий с
+  пурпурным), `RAIDER_SPRITE` 13×9 (серебристый корпус, красные крылья-клешни, жёлтые глаза;
+  стартовый, утверждает владелец), `EXPLOSION_FRAMES` — 2 кадра взрыва (11×9 вспышка, 13×9 осколки; тёплые
+  цвета; вид стартовый, утверждает владелец); разбираются при загрузке модуля.
+  `ENEMY_SHOT_COLOR = '#ff5fd2'` — цвет вражеского выстрела (не белый, не корпус корабля, не
+  цвет звёзд; стартовый, утверждает владелец).
+- `enemy.ts` — `ENEMY_KINDS { sprite, aim }` по виду (`Aim = 'fixed' | 'track'`: `drone` и `raider` —
+  `fixed`, `striker` — `track`); `Enemy(slot, formation)`: размер из
+  спрайта вида (хитбокс = картинка), позиция — левый верхний угол = слот; в `formation`
+  `update(dt, env)` пересчитывает позицию из слота (`EnemyEnv { diveSpeed, targetX }` —
+  новый объект на тик от волны). Состояния `formation | diving | returning | exploding | dead`:
+  `startDive(DiveOrder { sortieId, side, shots, aimOffsetX, groupMinOffsetX, groupMaxOffsetX })` —
+  только из `formation`, первый шаг — в следующем `update`; `shots` — выстрелов на этот вылет
+  (счётчик и сдвиги с прошлого вылета не переносятся); сдвиги — для группы `raider`, у
+  одиночки все 0. `diving` = peel (`PEEL_SEGMENTS` — отрезки в px/тик, зеркалятся по
+  `side`, фаза по `stateTicks`; 14 тиков) → descend: `vy = diveSpeed`, по X шаг `STEER_SPEED`
+  (1 px/тик) к `aimX`, если до него по центру врага (`x + floor(width / 2)`) ≥ 1 px, иначе
+  стоит; `fixed` — цель берётся в первом тике descend (`null` → весь descend прямо вниз): якорь —
+  центр корабля, зажатый в `[floor(w/2) - groupMinOffsetX, SCREEN_WIDTH - w + floor(w/2) -
+groupMaxOffsetX]`, плюс `aimOffsetX` (у края группа сдвигается целиком, не сжимаясь;
+  одиночку зажим не задевает); `track` поля группы не читает,
+  `track` — `targetX` каждого тика (`null` → `vx = 0`); `x` зажат в `[0, SCREEN_WIDTH - width]`. Уход за низ (`y >= SCREEN_HEIGHT`) →
+  `returning`: над текущим слотом (`y = -height`), шаг 1 px по осям (`STEER_SPEED` — и в descend, и в
+  `returning`; `RETURN_SPEED` = 60 px/с), не ниже `slotY`; в пределах шага — защёлкивается в слот →
+  `formation`. `kill()` (из любого живого) → `exploding` на месте попадания → через
+  `EXPLOSION_TICKS = 16` (`EXPLOSION_FRAME_TICKS = 8` × 2 кадра) → `dead`. `stateTicks` —
+  «Правило тиков переходов»: 0 в тике входа, `update` сначала `++`, затем таймер, затем
+  поведение. Геттеры от состояния: `isAlive` = строй + полёт, `isOut` = `diving | returning`,
+  `sortieId` — `null` вне полёта. В `exploding` стоит на месте, `dead` не обновляется.
+  Стрельба: `update` возвращает `boolean` — `true` только в тике выстрела в descend (выстрел
+  создаёт волна). Расписание — тики `D, D + 20, D + 40, …` (`D = 15`, первый тик descend;
+  `ENEMY_FIRE_INTERVAL_TICKS = 20`), пока остались выстрелы и низ врага не ниже верха корабля
+  (`y + height <= SHIP_Y`) по позиции после сдвига этого тика; в тике ухода за низ — не
+  стреляет. Выстрел расходуется, даже если волна отбросила его по лимиту. От `targetX` не
+  зависит (стреляют и при `null`).
+  Импортирует `config` (`SCREEN_WIDTH`, `SCREEN_HEIGHT`) и `ship` (`SHIP_Y`).
+- `attack-director.ts` — `selectSortie(enemies, cols, config, sortieId, rng)` — чистая.
+  Одиночные кандидаты — крайний левый (`side = -1`) и крайний правый (`+1`) ряда среди не-`raider`
+  в `formation`; одиночка ряда летит в сторону своей половины строя (ровно посередине —
+  вправо); `shots = config.diverShots`. Групповые кандидаты — группа `raider` целиком, если
+  все её живые члены в `formation` (взрывающиеся/мёртвые не участвуют, группа без живых не
+  даёт кандидата); `side` — по центру живых членов (посередине — вправо); `shots =
+config.raiderShots`. Порядок кандидатов — по рядам сверху вниз, внутри ряда по левому
+  столбцу; выбор `randomInt`; `null` без вызова `rng`, если кандидатов нет. Лидер — крайний
+  член в сторону `side`; `aimOffsetX = (col - leader.col) * CELL_WIDTH`, `groupMin/MaxOffsetX`
+  — min/max сдвигов (у одиночки всё 0). `Sortie { members, orders }` — участники по
+  столбцам, `members[i]` получает `orders[i]`. `AttackDirector(config)` — таймер в тиках от
+  `firstDiveDelayTicks`, на 0 запускает вылет, если в полёте меньше `maxSorties` различных
+  `sortieId` и есть кандидат, затем таймер = `diveIntervalTicks`; иначе ждёт на 0. Не
+  больше одного вылета за тик.
+- `wave.ts` — `Wave(config, rng)`: `parseLayout` → `Formation` → враги в порядке слотов
+  (`enemies`), `config` и `rng` боя хранятся, `AttackDirector` — один на уровень,
+  `EnemyEnv` — новый на тик (`diveSpeed` уровня + `targetX`). `update(dt, targetX)` — строй →
+  полёт вражеских выстрелов и удаление ушедших за низ → `enemy.update(dt, env)` каждого (если
+  враг выстрелил и на экране меньше `MAX_ENEMY_SHOTS = 4` — выстрел из центра нижнего края
+  спрайта, `floor(x) + floor(width / 2)`, `y + height`; лишний пропадает; в тике появления не
+  движется; слот, освобождённый уходом за низ, свободен в том же тике) → директор (вылетевший
+  стоит в слоте этого тика). `shots` — вражеские выстрелы в порядке создания (живой массив),
+  `removeShot(shot)` (неизвестный игнорируется), `clearShots()`. `isCleared` — все враги
+  `dead` (взрывы доиграны).
+- `collisions.ts` — `Rect`, `overlaps(a, b)` — строгий AABB по `Math.floor`-координатам
+  (касание краями — не пересечение). `resolveCollisions(player, wave)` — правило 1:
+  выстрел игрока убивает одного живого (`isAlive`: в строю или в полёте) врага, которого пересекает, — самого нижнего
+  (наибольший `y + height`, при равенстве — меньший индекс в `wave.enemies`), и
+  снимается. Правило 2 — вражеский выстрел: при `player.canBeHit` первый по порядку
+  `wave.shots` выстрел, пересекающий корабль, снимается, корабль — `hit()`; не больше одного за
+  тик. Правило 3 —
+  таран: при `player.canBeHit` первый по порядку `wave.enemies` враг вне строя
+  (`isOut`: `diving`/`returning`), пересекающий корабль, гибнет (`kill()`), корабль —
+  `hit()`; не больше одного тарана за тик. Правило 1 идёт первым: враг, сбитый
+  выстрелом в этом тике, уже `exploding` и не таранит. Правила 2 и 3 делят одно поражение за
+  тик: после попадания выстрела корабль уже не `canBeHit`, таранщик выживает и летит дальше.
+  Выстрелы игрока и врагов не взаимодействуют.
+- `test-levels.ts` — только для тестов: `passiveLevel(layout, overrides?)` — уровень с
+  пассивными значениями (`firstDiveDelayTicks = diveIntervalTicks = 1_000_000`, вылетов
+  нет; `diverShots = raiderShots = 0`; `overrides` включают отдельные поля);
+  `diveOrder(overrides?)` — одиночный `DiveOrder` с нулевыми умолчаниями (`sortieId = 1`,
+  `side = 1`, `shots` и сдвиги 0); `ONE_CORNER_ENEMY` (один `drone` в левом верхнем
+  углу раскладки ширины 11, `swaySpeed = 15`, стартовый x = 42 — далеко от столбца
+  выстрела); `TWO_LEVELS` — два разных пассивных уровня для теста смены уровня
+  (один `drone` в углу; два `drone` по углам), уровень 3+ повторяет второй.
+- `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
+  генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels? }`
+  (уровень по умолчанию 1, таблица — `LEVELS`; тесты внедряют таблицы из
+  `test-levels.ts`). `readonly player`, геттеры `level`, `wave`, `phase`
+  (`BattlePhase = 'playing' | 'cleared'`). `update(dt, intent)`: игрок → волна (получает
+  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` пикирующие летят прямо вниз) → коллизии (только `playing`) → фазы. Когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
+  через `LEVEL_PAUSE_TICKS = 90` (1,5 с, без надписи) — `level++`, новая `Wave`
+  (рисуется в этом тике в начальных позициях, первый `update` — в следующем), `playing`.
+  За концом таблицы повторяется последний уровень. В `cleared` игрок двигается и
+  стреляет как обычно.
+- `battle-render.ts` — `drawBattle(ctx, battle)`: вся отрисовка игровых сущностей,
+  слои вражеские выстрелы (`ENEMY_SHOT_COLOR`, 1×4) → выстрел игрока → враги (в порядке
+  `wave.enemies`, спрайт из `ENEMY_KINDS`) → корабль,
+  координаты через `Math.floor`; фон не рисует. `dead` — пропуск; `exploding` — кадр
+  `EXPLOSION_FRAMES[floor(stateTicks / EXPLOSION_FRAME_TICKS)]`, центрированный в
+  прямоугольнике врага. Корабль — по состоянию: `active` — спрайт; `down` — взрыв
+  (общий с врагами `drawExplosion`, по центру прямоугольника 15 × 16 на месте поражения)
+  `EXPLOSION_TICKS` тиков, затем ничего; `invulnerable` — мигание `BLINK_TICKS = 4`
+  (4 тика виден, 4 скрыт; виден в тике входа). Выстрел игрока рисуется в любом
+  состоянии корабля.
+- `canvas-test-utils.ts` — только для тестов: `recorder()` — фейковый ctx, пишет
+  `fillRect` с текущим `fillStyle` (`FillCall`); используют `sprite.test.ts`,
+  `battle-render.test.ts`.
+- `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?)`, `opts: BattleOptions`
+  передаются в `Battle` как есть. Игровая сцена: держит `readonly battle` (открыт для тестов,
+  тесты ходят через `scene.battle.player`); `update` — звёзды →
+  `battle.update(dt, readIntent(input))`. Слои: заливка → звёзды → `drawBattle`.
+  `readIntent` остаётся в сцене — `Battle` ввод не знает. `Starfield` принимает снаружи
+  или создаёт из `rng`. `Battle` создаётся в конструкторе с отдельным `Rng`: сначала
+  звёзды, потом seed боя `createRng(Math.floor(rng() * 2 ** 32))` — фон не влияет на бой.
 - `scenes/scene-test-utils.ts` — только для тестов: `step(scene, input, n)` прогоняет
   тики как `main.ts` (`update` → смена сцены → `input.endTick()`). Тесты сцен вызывают
   `update` только через него.
 
 Граф импортов: `title-scene → {play-scene, starfield}`,
-`play-scene → {starfield, player, art, sprite, shot}`, `player → ship` (`Input`, `Shot` —
-`import type`), `ship → {config, art, shot}`, `art → sprite`, `shot` — без импортов;
-`scene-test-utils → config` (типы `Scene`/`Input` — `import type`). Циклов нет;
-`engine` ничего не знает о `game`.
+`play-scene → {starfield, battle, battle-render, player, engine/rng}`,
+`battle → {player, ship, wave, levels, collisions}` (`Rng`, `LevelConfig`, `PlayerIntent` — type),
+`collisions → {ship, shot, enemy-shot}` (`Player`, `Wave`, `Enemy` — type),
+`battle-render → {art, enemy, enemy-art, enemy-shot, sprite, shot, ship}` (`Battle`, `Enemy`, `Player` — type),
+`main → {config, engine/*, game/levels, game/scenes/title-scene}`,
+`wave → {attack-director, enemy, enemy-shot, formation, levels}` (`Rng`, `EnemyEnv` — type),
+`attack-director → {engine/rng, formation}` (`Rng`, `DiveOrder`, `Enemy`, `LevelConfig` — type),
+`enemy → {config, enemy-art, ship}` (`Formation`, `EnemyKind`, `Slot`, `Sprite` — type), `formation → config`, `enemy-art → sprite`,
+`levels → config`, `player → ship` (`Ship`, `SHIP_START_X`; `Input`, `Shot`, `MoveDir` — `import type`),
+`ship → {config, art, shot}`, `art → sprite`, `shot` — без импортов, `enemy-shot → config`;
+`scene-test-utils → config` (типы `Scene`/`Input` — `import type`); `canvas-test-utils` —
+без импортов, `test-levels` (`LevelConfig`, `DiveOrder` — type) — оба только из `*.test.ts`. Циклов
+нет; `engine` ничего не знает о `game`.
 
 ## Принципы
 
 - Детерминизм: случайность — через `Rng`, время — через `dt`.
 - Скорости: для сущностей со спрайтом `SPEED * TICK_SECONDS` — целое число px/тик
   (иначе `Math.floor` при отрисовке даёт подёргивание); закреплено тестами
-  (`second-brain/decisions/002-integer-speeds.md`).
+  (`second-brain/decisions/002-integer-speeds.md`). Медленным движениям (покачивание
+  строя) разрешены двоичные дроби `1/2`, `1/4`, `1/8` px/тик; таймеры — целые тики
+  (`second-brain/decisions/003-slow-speeds-tick-timers.md`).
 - Логика отдельно от рендера — тестируется без canvas (Vitest, environment `node`).

@@ -26,4 +26,19 @@ describe('TitleScene', () => {
     step(new TitleScene(createRng(1)), input);
     expect(input.pressed('start')).toBe(false);
   });
+
+  it('starts the game from the given level', () => {
+    const input = new Input();
+    input.press('start');
+    const next = step(new TitleScene(createRng(1), 2), input);
+    expect(next).toBeInstanceOf(PlayScene);
+    expect((next as PlayScene).battle.level).toBe(2);
+  });
+
+  it('starts from level 1 without a start level', () => {
+    const input = new Input();
+    input.press('start');
+    const next = step(new TitleScene(createRng(1)), input);
+    expect((next as PlayScene).battle.level).toBe(1);
+  });
 });

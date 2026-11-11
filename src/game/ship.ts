@@ -15,12 +15,15 @@ export type MoveDir = -1 | 0 | 1;
 
 const MAX_X = SCREEN_WIDTH - SHIP_WIDTH;
 
+/** Ship's start and respawn x: horizontally centered. */
+export const SHIP_START_X = Math.floor((SCREEN_WIDTH - SHIP_WIDTH) / 2);
+
 /** Player ship. Position is the top-left corner in logical pixels. Moves horizontally only. */
 export class Ship {
   readonly y = SHIP_Y;
 
-  /** Defaults to horizontally centered. */
-  constructor(public x = Math.floor((SCREEN_WIDTH - SHIP_WIDTH) / 2)) {}
+  /** Defaults to SHIP_START_X (horizontally centered). */
+  constructor(public x = SHIP_START_X) {}
 
   /** Moves at a constant speed with no inertia; a step past an edge is cut to the edge. */
   update(dt: number, move: MoveDir): void {

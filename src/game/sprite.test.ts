@@ -1,24 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { recorder } from './canvas-test-utils';
 import { drawSprite, parseSprite } from './sprite';
-
-interface Call {
-  fillStyle: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-function recorder() {
-  const calls: Call[] = [];
-  const ctx = {
-    fillStyle: '',
-    fillRect(x: number, y: number, w: number, h: number) {
-      calls.push({ fillStyle: this.fillStyle, x, y, w, h });
-    },
-  };
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
-}
 
 describe('parseSprite', () => {
   it('derives width and height from the rows', () => {

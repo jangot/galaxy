@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import { SHIP_SPRITE } from './art';
-import { SHIP_HEIGHT, SHIP_SPEED, SHIP_WIDTH, SHIP_Y, Ship } from './ship';
+import { SHIP_HEIGHT, SHIP_SPEED, SHIP_START_X, SHIP_WIDTH, SHIP_Y, Ship } from './ship';
 import { SHOT_HEIGHT, SHOT_WIDTH } from './shot';
 
 const STEP = SHIP_SPEED * TICK_SECONDS;
@@ -27,6 +27,8 @@ describe('Ship', () => {
   it('starts horizontally centered at SHIP_Y', () => {
     const ship = new Ship();
     expect(ship.x).toBe(Math.floor((SCREEN_WIDTH - SHIP_WIDTH) / 2));
+    expect(SHIP_START_X).toBe(120);
+    expect(ship.x).toBe(SHIP_START_X);
     expect(ship.y).toBe(SHIP_Y);
   });
 

@@ -10,14 +10,20 @@ export class TitleScene implements Scene {
   private readonly starfield: Starfield;
   private ticks = 0;
 
-  constructor(private readonly rng: Rng) {
+  constructor(
+    private readonly rng: Rng,
+    /** Level the game starts from; undefined = 1. Dev builds pass ?level=N. */
+    private readonly startLevel?: number,
+  ) {
     this.starfield = new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, rng);
   }
 
   update(dt: number, input: Input): Scene | void {
     this.ticks++;
     this.starfield.update(dt);
-    if (input.pressed('start')) return new PlayScene(this.rng, this.starfield);
+    if (input.pressed('start')) {
+      return new PlayScene(this.rng, this.starfield, { startLevel: this.startLevel });
+    }
   }
 
   render(ctx: CanvasRenderingContext2D): void {
