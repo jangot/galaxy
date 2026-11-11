@@ -4,6 +4,7 @@ import { GameLoop } from './engine/loop';
 import { createRng } from './engine/rng';
 import type { Scene } from './engine/scene';
 import { setupScreen } from './engine/screen';
+import { parseStartLevel } from './game/levels';
 import { TitleScene } from './game/scenes/title-scene';
 
 const canvas = document.getElementById('screen');
@@ -14,7 +15,11 @@ const input = new Input();
 input.attach(window);
 
 const rng = createRng(Date.now());
-let scene: Scene = new TitleScene(rng);
+// Dev only: ?level=N starts from level N (anything but an integer >= 1 means level 1).
+const startLevel = import.meta.env.DEV
+  ? parseStartLevel(new URLSearchParams(window.location.search).get('level'))
+  : undefined;
+let scene: Scene = new TitleScene(rng, startLevel);
 
 new GameLoop(TICK_SECONDS, {
   update(dt) {
