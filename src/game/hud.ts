@@ -18,11 +18,6 @@ export interface HudZone {
   readonly height: number;
 }
 
-/** Until the scoring feature: the battle has no score yet. */
-export const PLACEHOLDER_SCORE = 0;
-/** Until the lives feature: total lives including the current ship. */
-export const PLACEHOLDER_LIVES = 3;
-
 export const SCORE_DIGITS = 6;
 export const SCORE_LABEL = 'SCORE';
 export const LEVEL_LABEL = 'LEVEL';
@@ -40,7 +35,7 @@ export const HUD_VALUE_Y = 14;
 export const LIFE_ICON_MAX_SIZE = 8;
 /** Horizontal step between lives icons: icon <= 8 px plus a 2 px gap. */
 export const LIFE_ICON_STEP = 10;
-/** How many icons the lives zone holds (layout reserve). */
+/** How many icons the lives zone holds; drawLives draws at most this many. */
 export const LIVES_ICON_SLOTS = 5;
 
 /** Label row + value row: 14 + 7 - 4 = 17. */
@@ -77,9 +72,9 @@ export const LIVES_ZONE: HudZone = {
 /** All section zones, for the overlap test; a new section adds its zone here. */
 export const HUD_ZONES: readonly HudZone[] = [SCORE_ZONE, LEVEL_ZONE, LIVES_ZONE];
 
-/** Builds the HUD snapshot; score and lives are placeholders until their features exist. */
+/** Builds the HUD snapshot from the battle: level, score and lives. */
 export function hudView(battle: Battle): HudView {
-  return { level: battle.level, score: PLACEHOLDER_SCORE, lives: PLACEHOLDER_LIVES };
+  return { level: battle.level, score: battle.score, lives: battle.player.lives };
 }
 
 /** Zero-padded to SCORE_DIGITS; longer numbers are kept whole. Expects an integer >= 0. */

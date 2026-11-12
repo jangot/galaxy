@@ -7,22 +7,27 @@ import { PlayScene } from './play-scene';
 
 /** Placeholder title screen: starfield + caption. Real menu comes in a separate task. */
 export class TitleScene implements Scene {
-  private readonly starfield: Starfield;
+  /** Exposed for tests. */
+  readonly starfield: Starfield;
   private ticks = 0;
 
   constructor(
     private readonly rng: Rng,
     /** Level the game starts from; undefined = 1. Dev builds pass ?level=N. */
     private readonly startLevel?: number,
+    /** Continue the stars when coming back from a game; undefined = new ones from rng. */
+    starfield?: Starfield,
   ) {
-    this.starfield = new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, rng);
+    this.starfield = starfield ?? new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, rng);
   }
 
   update(dt: number, input: Input): Scene | void {
     this.ticks++;
     this.starfield.update(dt);
     if (input.pressed('start')) {
-      return new PlayScene(this.rng, this.starfield, { startLevel: this.startLevel });
+      // The factory lives here, so play-scene never imports title-scene (no module cycle).
+      const exit = (): Scene => new TitleScene(this.rng, this.startLevel, this.starfield);
+      return new PlayScene(this.rng, this.starfield, { startLevel: this.startLevel }, exit);
     }
   }
 

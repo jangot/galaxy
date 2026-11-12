@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
-import { Battle, LEVEL_PAUSE_TICKS } from './battle';
+import { Battle, GAME_OVER_DELAY_TICKS, LEVEL_PAUSE_TICKS } from './battle';
 import { EXPLOSION_TICKS, PEEL_SEGMENTS, STRIKER_TURN_TICKS } from './enemy';
 import { LEVELS } from './levels';
 import type { PlayerIntent } from './player';
+import { MAX_LIVES, START_LIVES } from './player';
+import { killPoints } from './score';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y } from './ship';
 import { diveOrder, ONE_CORNER_ENEMY, passiveLevel, TWO_LEVELS } from './test-levels';
 
@@ -19,6 +21,35 @@ function run(battle: Battle, n: number, intent: PlayerIntent = IDLE): void {
 function clearWave(battle: Battle): void {
   for (const e of battle.wave.enemies) e.kill();
   run(battle, EXPLOSION_TICKS + LEVEL_PAUSE_TICKS);
+}
+
+/** Puts a diving enemy onto the ship, with a margin against the peel step of this tick. */
+function ramShip(battle: Battle): void {
+  const enemy = battle.wave.enemies[0]!;
+  enemy.startDive(diveOrder());
+  enemy.x = battle.player.ship.x + 2;
+  enemy.y = SHIP_Y + 2;
+}
+
+/** A one-enemy battle with a single life, already in over. */
+function overBattle(): Battle {
+  const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+  battle.player.hit();
+  run(battle, GAME_OVER_DELAY_TICKS);
+  expect(battle.phase).toBe('over');
+  return battle;
+}
+
+/**
+ * Shoots down the ONE_CORNER_ENEMY drone in formation through update() (two ticks), as in
+ * 'shoots down an enemy through update()'.
+ */
+function shootCornerEnemy(battle: Battle): void {
+  battle.player.ship.x = 40; // shot column x = 47
+  battle.update(TICK_SECONDS, FIRE);
+  battle.player.shot!.y = 42;
+  battle.update(TICK_SECONDS, FIRE);
+  expect(battle.wave.enemies[0]!.state).toBe('exploding');
 }
 
 describe('Battle', () => {
@@ -261,5 +292,234 @@ describe('Battle enemy shots', () => {
     expect(battle.player.state).toBe('down');
     expect(battle.wave.shots).toHaveLength(0);
     expect(enemy.state).toBe('diving');
+  });
+});
+
+describe('Battle lives and game over', () => {
+  it('passes opts.lives to the player', () => {
+    expect(new Battle(createRng(1)).player.lives).toBe(START_LIVES);
+    expect(new Battle(createRng(1), { lives: 1 }).player.lives).toBe(1);
+    expect(() => new Battle(createRng(1), { lives: 0 })).toThrow(RangeError);
+  });
+
+  it('enters over exactly GAME_OVER_DELAY_TICKS after the last ship is hit', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+    battle.player.hit();
+    run(battle, GAME_OVER_DELAY_TICKS - 1);
+    expect(battle.phase).toBe('playing');
+    expect(battle.player.state).toBe('down');
+    run(battle, 1);
+    expect(battle.phase).toBe('over');
+    expect(battle.phaseTicks).toBe(0);
+  });
+
+  it('does not enter over while lives are left', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 2 });
+    battle.player.hit();
+    run(battle, GAME_OVER_DELAY_TICKS);
+    expect(battle.phase).toBe('playing');
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.lives).toBe(1);
+  });
+
+  it('ends the game, not the level, when the last ship rams the last enemy', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+    const enemy = battle.wave.enemies[0]!;
+    ramShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(enemy.state).toBe('exploding');
+    expect(battle.player.isLost).toBe(true);
+    run(battle, EXPLOSION_TICKS);
+    expect(battle.phase).toBe('cleared');
+    run(battle, GAME_OVER_DELAY_TICKS - EXPLOSION_TICKS - 1);
+    expect(battle.phase).toBe('cleared');
+    run(battle, 1);
+    expect(battle.phase).toBe('over');
+    expect(battle.level).toBe(1);
+    const { wave } = battle;
+    run(battle, LEVEL_PAUSE_TICKS * 2);
+    expect(battle.phase).toBe('over');
+    expect(battle.level).toBe(1);
+    expect(battle.wave).toBe(wave);
+  });
+
+  it('has no collisions in over', () => {
+    // In over the ship is down (cannot be hit) and has no shot, so disabled collisions are
+    // indistinguishable from enabled ones through the public API: this pins the behavior.
+    const battle = overBattle();
+    const enemy = battle.wave.enemies[0]!;
+    ramShip(battle);
+    run(battle, 1);
+    expect(enemy.isOut).toBe(true);
+    expect(battle.phase).toBe('over');
+    expect(battle.player.lives).toBe(0);
+  });
+
+  it('keeps the wave flying in over', () => {
+    const battle = overBattle();
+    const offset = battle.wave.formation.offset;
+    run(battle, 1);
+    expect(battle.wave.formation.offset).not.toBe(offset);
+  });
+
+  it('counts phaseTicks in every phase from 0 after each transition', () => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    expect(battle.phaseTicks).toBe(0);
+    run(battle, 5);
+    expect(battle.phaseTicks).toBe(5);
+
+    battle.wave.enemies[0]!.kill();
+    run(battle, EXPLOSION_TICKS);
+    expect(battle.phase).toBe('cleared');
+    expect(battle.phaseTicks).toBe(0);
+    run(battle, 1);
+    expect(battle.phaseTicks).toBe(1);
+
+    run(battle, LEVEL_PAUSE_TICKS - 1);
+    expect(battle.phase).toBe('playing');
+    expect(battle.level).toBe(2);
+    expect(battle.phaseTicks).toBe(0);
+    run(battle, 3);
+    expect(battle.phaseTicks).toBe(3);
+  });
+
+  it('counts phaseTicks in over', () => {
+    const battle = overBattle();
+    expect(battle.phaseTicks).toBe(0);
+    run(battle, 3);
+    expect(battle.phaseTicks).toBe(3);
+  });
+});
+
+// Extra-life tests reach 5000 with one kill: past the end of a passive table levelConfig
+// only shrinks the 1_000_000-tick dive timers (still passive) and killPoints has no cap (В2),
+// so a high startLevel gives exactly EXTRA_LIFE_FIRST in one kill without widening Battle's API.
+/** A drone in formation is worth exactly 5000 here (1655 gives 4990). */
+const DRONE_5000_LEVEL = 1656;
+/** A rammed striker (in flight) is worth exactly 5000 here (615 gives 4990). */
+const STRIKER_RAM_5000_LEVEL = 616;
+
+describe('Battle score', () => {
+  it('starts at 0', () => {
+    expect(new Battle(createRng(1)).score).toBe(0);
+  });
+
+  it('adds formation points on the tick of the hit', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY });
+    battle.player.ship.x = 40; // shot column x = 47
+    battle.update(TICK_SECONDS, FIRE);
+    expect(battle.score).toBe(0);
+    battle.player.shot!.y = 42;
+    battle.update(TICK_SECONDS, FIRE);
+    expect(battle.wave.enemies[0]!.state).toBe('exploding');
+    expect(battle.score).toBe(30);
+  });
+
+  it('adds in-flight points for a ram', () => {
+    const battle = new Battle(createRng(1), { levels: [passiveLevel(['S..........'])] });
+    ramShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(battle.wave.enemies[0]!.state).toBe('exploding');
+    expect(battle.player.state).toBe('down');
+    expect(battle.score).toBe(80);
+  });
+
+  it.each([
+    [5, 40],
+    [11, 60],
+  ])('scales the points by the level (level %i -> %i)', (startLevel, points) => {
+    // Escalation keeps ONE_CORNER_ENEMY passive with the same layout.
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, startLevel });
+    shootCornerEnemy(battle);
+    expect(battle.score).toBe(points);
+  });
+
+  it('keeps the score through cleared and the next level', () => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    shootCornerEnemy(battle);
+    expect(battle.score).toBe(30);
+    run(battle, EXPLOSION_TICKS);
+    expect(battle.phase).toBe('cleared');
+    expect(battle.score).toBe(30);
+    run(battle, LEVEL_PAUSE_TICKS);
+    expect(battle.level).toBe(2);
+    expect(battle.phase).toBe('playing');
+    expect(battle.score).toBe(30);
+  });
+
+  it('does not score in over', () => {
+    const battle = overBattle();
+    ramShip(battle);
+    run(battle, 1);
+    expect(battle.wave.enemies[0]!.isOut).toBe(true);
+    expect(battle.score).toBe(0);
+  });
+});
+
+describe('Battle extra lives', () => {
+  it('uses levels where one kill is worth exactly 5000', () => {
+    expect(killPoints({ kind: 'drone', inFlight: false }, DRONE_5000_LEVEL)).toBe(5000);
+    expect(killPoints({ kind: 'drone', inFlight: false }, DRONE_5000_LEVEL - 1)).toBe(4990);
+    expect(killPoints({ kind: 'striker', inFlight: true }, STRIKER_RAM_5000_LEVEL)).toBe(5000);
+    expect(killPoints({ kind: 'striker', inFlight: true }, STRIKER_RAM_5000_LEVEL - 1)).toBe(4990);
+  });
+
+  it('gives a life when the score crosses 5000', () => {
+    const battle = new Battle(createRng(1), {
+      levels: ONE_CORNER_ENEMY,
+      startLevel: DRONE_5000_LEVEL,
+    });
+    shootCornerEnemy(battle);
+    expect(battle.score).toBe(5000);
+    expect(battle.player.lives).toBe(START_LIVES + 1);
+  });
+
+  it('does not go over MAX_LIVES', () => {
+    const battle = new Battle(createRng(1), {
+      levels: ONE_CORNER_ENEMY,
+      startLevel: DRONE_5000_LEVEL,
+      lives: MAX_LIVES,
+    });
+    shootCornerEnemy(battle);
+    expect(battle.score).toBe(5000);
+    expect(battle.player.lives).toBe(MAX_LIVES);
+  });
+
+  it('charges a lost ship before the extra life', () => {
+    const battle = new Battle(createRng(1), {
+      levels: [passiveLevel(['S..........'])],
+      startLevel: STRIKER_RAM_5000_LEVEL,
+      lives: MAX_LIVES,
+    });
+    ramShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(battle.player.state).toBe('down');
+    expect(battle.score).toBe(5000);
+    expect(battle.player.lives).toBe(MAX_LIVES); // 5 -> 4 -> 5
+  });
+
+  it('an extra life in down at 0 lives cancels game over', () => {
+    const battle = new Battle(createRng(1), {
+      levels: ONE_CORNER_ENEMY,
+      startLevel: DRONE_5000_LEVEL,
+      lives: 1,
+    });
+    battle.player.ship.x = 40; // shot column x = 47
+    battle.update(TICK_SECONDS, FIRE); // the shot leaves the live ship
+    battle.player.hit(); // the last ship is lost with the shot in flight
+    expect(battle.player.isLost).toBe(true);
+    battle.player.shot!.y = 42;
+    battle.update(TICK_SECONDS, IDLE); // stateTicks = 1: the shot hits, 5000 points
+    expect(battle.wave.enemies[0]!.state).toBe('exploding');
+    expect(battle.score).toBe(5000);
+    expect(battle.player.lives).toBe(1);
+    expect(battle.player.isLost).toBe(false);
+    run(battle, GAME_OVER_DELAY_TICKS - 2);
+    expect(battle.player.state).toBe('down');
+    run(battle, 1); // DOWN_TICKS since the hit
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.phase).not.toBe('over');
+    run(battle, GAME_OVER_DELAY_TICKS);
+    expect(battle.phase).not.toBe('over');
   });
 });

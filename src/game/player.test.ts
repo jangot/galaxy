@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { TICK_SECONDS } from '../config';
 import { Input } from '../engine/input';
 import type { PlayerIntent } from './player';
-import { DOWN_TICKS, INVULNERABLE_TICKS, Player, readIntent } from './player';
+import {
+  DOWN_TICKS,
+  INVULNERABLE_TICKS,
+  MAX_LIVES,
+  Player,
+  readIntent,
+  START_LIVES,
+} from './player';
 import { SHIP_SPEED, SHIP_START_X, SHIP_WIDTH, Ship } from './ship';
 import type { Shot } from './shot';
 import { SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH } from './shot';
@@ -314,5 +321,125 @@ describe('Player ship state', () => {
     expect(player.state).toBe('active');
     player.hit();
     expect(player.state).toBe('down');
+  });
+});
+
+describe('Player lives', () => {
+  it('starts with START_LIVES = 3 and is not lost', () => {
+    expect(START_LIVES).toBe(3);
+    const player = new Player();
+    expect(player.lives).toBe(START_LIVES);
+    expect(player.isLost).toBe(false);
+  });
+
+  it('accepts the starting lives in the constructor', () => {
+    expect(new Player(new Ship(), MAX_LIVES).lives).toBe(MAX_LIVES);
+    expect(new Player(new Ship(), 1).lives).toBe(1);
+  });
+
+  it.each([0, -1, 1.5, NaN, MAX_LIVES + 1])('rejects %s lives with a RangeError', (lives) => {
+    expect(() => new Player(new Ship(), lives)).toThrow(RangeError);
+  });
+
+  it('grows the lives with addLife up to MAX_LIVES and not above', () => {
+    expect(MAX_LIVES).toBe(5);
+    const player = new Player(new Ship(), MAX_LIVES - 1);
+    player.addLife();
+    expect(player.lives).toBe(MAX_LIVES);
+    player.addLife();
+    expect(player.lives).toBe(MAX_LIVES);
+  });
+
+  it('keeps the state and stateTicks on addLife in active and invulnerable', () => {
+    const player = new Player();
+    run(player, 3);
+    player.addLife();
+    expect(player.state).toBe('active');
+    expect(player.stateTicks).toBe(3);
+    player.hit();
+    run(player, DOWN_TICKS + 5);
+    expect(player.state).toBe('invulnerable');
+    expect(player.stateTicks).toBe(5);
+    player.addLife();
+    expect(player.state).toBe('invulnerable');
+    expect(player.stateTicks).toBe(5);
+    expect(player.lives).toBe(START_LIVES + 1); // 3 + 1 - 1 + 1
+  });
+
+  it('brings the respawn back with addLife in down at 0 lives, on the usual tick', () => {
+    const player = new Player(new Ship(), 1);
+    player.hit();
+    run(player, 10); // the extra life comes later than the hit, the timer is not restarted
+    player.addLife();
+    expect(player.lives).toBe(1);
+    expect(player.isLost).toBe(false);
+    expect(player.state).toBe('down');
+    expect(player.stateTicks).toBe(10);
+    run(player, DOWN_TICKS - 11);
+    expect(player.state).toBe('down');
+    run(player, 1);
+    expect(player.state).toBe('invulnerable');
+    expect(player.ship.x).toBe(SHIP_START_X);
+  });
+
+  it('takes a life on the hit() call itself', () => {
+    const player = new Player();
+    player.hit();
+    expect(player.lives).toBe(START_LIVES - 1);
+    expect(player.state).toBe('down');
+  });
+
+  it('takes no life on hit() while down or invulnerable', () => {
+    const player = new Player();
+    player.hit();
+    player.hit();
+    expect(player.lives).toBe(START_LIVES - 1);
+    run(player, DOWN_TICKS);
+    expect(player.state).toBe('invulnerable');
+    player.hit();
+    expect(player.lives).toBe(START_LIVES - 1);
+    expect(player.state).toBe('invulnerable');
+  });
+
+  it('respawns on tick DOWN_TICKS while lives are left, without changing them', () => {
+    const player = new Player();
+    player.hit();
+    run(player, DOWN_TICKS - 1);
+    expect(player.state).toBe('down');
+    run(player, 1);
+    expect(player.state).toBe('invulnerable');
+    expect(player.lives).toBe(START_LIVES - 1);
+    expect(player.isLost).toBe(false);
+  });
+
+  it('stays down for good after the last life', () => {
+    const player = new Player(new Ship(40), 1);
+    player.hit();
+    expect(player.lives).toBe(0);
+    expect(player.isLost).toBe(true);
+    run(player, DOWN_TICKS);
+    run(player, 1000, RIGHT_FIRE);
+    expect(player.state).toBe('down');
+    expect(player.canBeHit).toBe(false);
+    expect(player.canBeTargeted).toBe(false);
+    expect(player.ship.x).toBe(40);
+    expect(player.shot).toBeNull();
+    expect(player.stateTicks).toBe(DOWN_TICKS + 1000);
+    expect(player.lives).toBe(0);
+  });
+
+  it('lets the shot in flight fly on after the last life is lost', () => {
+    const player = new Player(new Ship(40), 1);
+    player.update(TICK_SECONDS, FIRE);
+    const shot = requireShot(player);
+    player.hit();
+    expect(player.isLost).toBe(true);
+    expect(player.shot).toBe(shot);
+    const y0 = shot.y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(shot.y).toBe(y0 - SHOT_STEP);
+    shot.y = LAST_ON_SCREEN_Y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(player.shot).toBeNull();
   });
 });

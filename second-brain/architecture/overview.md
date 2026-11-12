@@ -23,9 +23,12 @@
 ## Игра
 
 - `starfield.ts` — фон из звёзд.
-- `scenes/title-scene.ts` — `TitleScene(rng, startLevel?)`, заглушка титульного экрана;
-  по `start` (Enter) возвращает `PlayScene`, передавая свой `rng`, тот же экземпляр
-  `Starfield` — звёзды продолжаются без скачка — и `{ startLevel }`.
+- `scenes/title-scene.ts` — `TitleScene(rng, startLevel?, starfield?)`, заглушка титульного
+  экрана; переданные звёзды продолжаются (`rng` на них не тратится), без них — новые из `rng`;
+  `readonly starfield` (для тестов). По `start` (Enter) возвращает `PlayScene`, передавая свой
+  `rng`, тот же экземпляр `Starfield` — звёзды продолжаются без скачка — `{ startLevel }` и
+  фабрику `exit`, создающую новый `TitleScene` с теми же `rng`, `startLevel`, `starfield`
+  (возврат после Game Over). Фабрика живёт в титуле — `play-scene` не импортирует `title-scene`.
 - Точка входа `main.ts`: в dev-сборке (`import.meta.env.DEV`) читает `?level=N` через
   `parseStartLevel` и передаёт в `TitleScene`; в прод-сборке — `undefined` (уровень 1).
 - `sprite.ts` — формат спрайта: массив строк + палитра, `.` — прозрачный пиксель.
@@ -74,11 +77,18 @@
   `update` идёт до коллизий). Порядок тика: движение корабля → полёт
   выстрела и удаление ушедшего → огонь (слот освобождается в том же тике, новый выстрел
   вылетает из уже сдвинутого корабля и в тике вылета не движется).
-  Автомат корабля (`ShipState`): `active` → `hit()` → `down` → `DOWN_TICKS = 60` (1 с) →
-  `invulnerable` → `INVULNERABLE_TICKS = 120` (2 с) → `active`. Геттеры `state`,
+  Жизни: `START_LIVES = 3` (общее число, включая корабль на поле), `MAX_LIVES = 5`;
+  конструктор `Player(ship?, lives?)` — `lives` целое 1…`MAX_LIVES`, иначе `RangeError`;
+  геттеры `lives`, `isLost` (`lives === 0`). `addLife()` — `lives + 1` до `MAX_LIVES` в
+  любом состоянии, состояние и `stateTicks` не трогает; в `down` при 0 жизнях возвращает
+  возрождение в тик `DOWN_TICKS` от попадания.
+  Автомат корабля (`ShipState`): `active` → `hit()` (`lives − 1`) → `down` → `DOWN_TICKS = 60`
+  (1 с), только при `lives > 0` → `invulnerable` → `INVULNERABLE_TICKS = 120` (2 с) →
+  `active`; при `lives === 0` корабль остаётся `down`, пока `addLife()` не вернёт жизнь (`stateTicks` растёт, ввод
+  игнорируется, выстрел в полёте долетает). Геттеры `state`,
   `stateTicks`, `canBeHit` (только `active`), `canBeTargeted` (всё, кроме `down`).
-  `hit()` действует только из `active` (в `down`/`invulnerable` игнорируется, таймер не
-  сбрасывает) и не снимает выстрел в полёте. Правило тиков — как у `Enemy`: вход в
+  `hit()` действует только из `active` (в `down`/`invulnerable` игнорируется: жизнь не
+  списывает, таймер не сбрасывает) и не снимает выстрел в полёте. Правило тиков — как у `Enemy`: вход в
   состояние ставит `stateTicks = 0`; `update` — счёт тика → переход по таймеру →
   поведение нового состояния. В `down` ввод игнорируется, летит только выстрел; в тике
   возрождения корабль ставится в `SHIP_START_X`, и intent этого тика уже применяется
@@ -198,7 +208,18 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `hit()`; не больше одного тарана за тик. Правило 1 идёт первым: враг, сбитый
   выстрелом в этом тике, уже `exploding` и не таранит. Правила 2 и 3 делят одно поражение за
   тик: после попадания выстрела корабль уже не `canBeHit`, таранщик выживает и летит дальше.
-  Выстрелы игрока и врагов не взаимодействуют.
+  Выстрелы игрока и врагов не взаимодействуют. Возвращает `readonly Kill[]`
+  (`Kill { kind, inFlight }`) — убийства тика в порядке событий: событие записывается до
+  `kill()`, `inFlight` = `enemy.isOut` (у тарана всегда `true`); не больше двух за тик,
+  правило 1 раньше правила 3; вражеский выстрел событий не даёт.
+- `score.ts` — очки без состояния: `KindPoints { formation, flying }`, `ENEMY_POINTS`
+  (В1: `drone` 30/60, `striker` 40/80, `raider` 50/100), `killPoints(kill, level)` —
+  целочисленная формула `floor((base × (9 + level) + 50) / 100) × 10` (+10 % за уровень
+  выше первого, к ближайшим 10, половина вверх, без потолка; В2), `RangeError` на уровне
+  не целом ≥ 1. Доп. жизни (В4): `EXTRA_LIFE_FIRST = 5000`, `EXTRA_LIFE_EVERY = 10000`,
+  `extraLivesEarned(before, after)` — число порогов 5000/15000/25000/…, пройденных за
+  начисление (ровно на пороге — считается), без предела по жизням; внутренняя
+  `thresholdsReached`.
 - `test-levels.ts` — только для тестов: `passiveLevel(layout, overrides?)` — уровень с
   пассивными значениями (`firstDiveDelayTicks = diveIntervalTicks = 1_000_000`, вылетов
   нет; `diverShots = raiderShots = 0`; `overrides` включают отдельные поля);
@@ -213,11 +234,16 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   таран»), `EVASION_START`, `runEvasion(diver, step, script)` (скриптовый корабль стоит /
   финтит, таран — `overlaps`); используют `enemy.test.ts` и `steering.test.ts`.
 - `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
-  генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels? }`
-  (уровень по умолчанию 1, таблица — `LEVELS`; тесты внедряют таблицы из
-  `test-levels.ts`). `readonly player`, геттеры `level`, `wave`, `phase`
-  (`BattlePhase = 'playing' | 'cleared'`). `update(dt, intent)`: игрок → волна (получает
-  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → коллизии (только `playing`) → фазы. Когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
+  генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels?, lives? }`
+  (уровень по умолчанию 1, таблица — `LEVELS`, жизни — `START_LIVES`, проверяет `Player`;
+  тесты внедряют таблицы из `test-levels.ts`). `readonly player` (создаётся в конструкторе
+  с `opts.lives`, `rng` не трогает), геттеры `level`, `wave`, `score` (целое ≥ 0, с 0;
+  меняется только в private `addScore`; там же за каждый пройденный порог
+  `player.addLife()` — после `resolveCollisions`, так что гибель этого тика списывается
+  раньше; доп. жизнь в `down` при 0 жизнях отменяет `over`), `phase`
+  (`BattlePhase = 'playing' | 'cleared' | 'over'`), `phaseTicks` — общий счётчик всех фаз
+  (0 после `update` перехода, +1 за каждый следующий; private `ticksInPhase`). `update(dt, intent)`: игрок → волна (получает
+  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → коллизии и начисление очков (только `playing`: `addScore(killPoints(kill, level))` за каждое убийство, уровень этого тика) → фазы. Фазы: счёт тика, затем по порядку — (1) из `playing`/`cleared` в `over`, когда `player.isLost` и `player.stateTicks >= GAME_OVER_DELAY_TICKS` (`= DOWN_TICKS`, 1 с — момент, когда корабль появился бы); проверяется первым, поэтому после потери последнего корабля уровень не меняется; `over` терминальна: коллизий нет, волна обновляется дальше; (2) когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
   через `LEVEL_PAUSE_TICKS = 90` (1,5 с, без надписи) — `level++`, новая `Wave`
   (рисуется в этом тике в начальных позициях, первый `update` — в следующем), `playing`.
   За концом таблицы — эскалация последнего уровня (`levelConfig`). В `cleared` игрок двигается и
@@ -233,8 +259,8 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   (4 тика виден, 4 скрыт; виден в тике входа). Выстрел игрока рисуется в любом
   состоянии корабля.
 - `hud.ts` — модель панели без canvas: `HudView { level, score, lives }` (`lives` — общее
-  число, включая корабль на поле), `hudView(battle)` (уровень — `battle.level`; счёт и
-  жизни — заглушки `PLACEHOLDER_SCORE = 0`, `PLACEHOLDER_LIVES = 3`), `formatScore`
+  число, включая корабль на поле), `hudView(battle)` (уровень — `battle.level`, жизни —
+  `battle.player.lives`, счёт — `battle.score`), `formatScore`
   (6 цифр с ведущими нулями, длиннее — целиком), `formatLevel`; раскладка:
   `HUD_HEIGHT = 24`, `HUD_MARGIN_X = 8`, строки `HUD_LABEL_Y = 4` / `HUD_VALUE_Y = 14`,
   `HudZone`, `SCORE_ZONE` (8, 4, 48×17), `LEVEL_ZONE` (108, 4, 40×17; номер — по центру
@@ -244,15 +270,27 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `HUD_ZONES` — для теста непересечения. Новая секция = поле `HudView` + зона + `drawX`.
 - `hud-render.ts` — `drawHud(ctx, view)`: секции счёт → уровень → жизни, каждая рисует
   только в своей зоне; подписи `HUD_LABEL_COLOR`, значения `HUD_VALUE_COLOR` через
-  `drawText`, иконки — `drawSprite` (своей палитрой); фон не рисует.
+  `drawText`, иконки — `drawSprite` (своей палитрой), не больше `LIVES_ICON_SLOTS`; фон не рисует.
+- `game-over-render.ts` — `drawGameOver(ctx, phaseTicks, backdrop = GAME_OVER_BACKDROP)`:
+  `GAME OVER` (`HUD_LABEL_COLOR`, y = `GAME_OVER_Y` = 112) и под ним мигающее `PRESS ENTER`
+  (`HUD_VALUE_COLOR`, y = `PRESS_ENTER_Y` = 128) пиксельным шрифтом, по X по центру —
+  `centeredX(text)` = `floor((SCREEN_WIDTH − textWidth(text)) / 2)`. Мигание от
+  `battle.phaseTicks`: `isPromptVisible` — видно `PRESS_ENTER_BLINK_TICKS = 30` тиков, скрыто
+  30, видно с `phaseTicks = 0`. Чёрная подложка под строками (поле `GAME_OVER_BACKDROP_PAD = 2`,
+  рисуется до текста строки, под `PRESS ENTER` — и когда текст скрыт) выключена
+  константой `GAME_OVER_BACKDROP = false`.
 - `canvas-test-utils.ts` — только для тестов: `recorder()` — фейковый ctx, пишет
   `fillRect` с текущим `fillStyle` (`FillCall`); используют `sprite.test.ts`,
-  `battle-render.test.ts`, `font.test.ts`, `hud-render.test.ts`.
-- `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?)`, `opts: BattleOptions`
-  передаются в `Battle` как есть. Игровая сцена: держит `readonly battle` (открыт для тестов,
-  тесты ходят через `scene.battle.player`); `update` — звёзды →
-  `battle.update(dt, readIntent(input))`. Слои: заливка → звёзды → `drawBattle` →
-  `drawHud(hudView(battle))` (панель последней, без фона).
+  `battle-render.test.ts`, `font.test.ts`, `hud-render.test.ts`, `game-over-render.test.ts`,
+  `scenes/play-scene.test.ts`.
+- `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?, exit?)`, `opts: BattleOptions`
+  передаются в `Battle` как есть, `exit: () => Scene` — куда ведёт Enter после Game Over.
+  Игровая сцена: держит `readonly battle` и `readonly starfield` (открыты для тестов, тесты
+  ходят через `scene.battle.player`); `update` — звёзды → `battle.update(dt, readIntent(input))`
+  → в фазе `over` по `start` возвращает `exit()` (проверка после боя — Enter в тик перехода
+  в `over` уже срабатывает; без `exit` сцена остаётся). Слои: заливка → звёзды → `drawBattle` →
+  `drawHud(hudView(battle))` (без фона) → в фазе `over` `drawGameOver(ctx, battle.phaseTicks)`
+  последним. Цикла `play ↔ title` нет: фабрику `exit` создаёт `TitleScene`.
   `readIntent` остаётся в сцене — `Battle` ввод не знает. `Starfield` принимает снаружи
   или создаёт из `rng`. `Battle` создаётся в конструкторе с отдельным `Rng`: сначала
   звёзды, потом seed боя `createRng(Math.floor(rng() * 2 ** 32))` — фон не влияет на бой.
@@ -261,10 +299,12 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   `update` только через него.
 
 Граф импортов: `title-scene → {play-scene, starfield}`,
-`play-scene → {starfield, battle, battle-render, hud, hud-render, player, engine/rng}`,
+`play-scene → {starfield, battle, battle-render, game-over-render, hud, hud-render, player, engine/rng}`,
+`game-over-render → {config, art, font}`,
 `hud → {config, font}` (`Battle` — type), `hud-render → {art, font, hud, sprite}` (`HudView`, `HudZone` — type),
-`battle → {player, ship, wave, levels, collisions}` (`Rng`, `LevelConfig`, `PlayerIntent` — type),
-`collisions → {ship, shot, enemy-shot}` (`Player`, `Wave`, `Enemy` — type),
+`battle → {player, ship, wave, levels, collisions, score}` (`Rng`, `LevelConfig`, `PlayerIntent` — type),
+`collisions → {ship, shot, enemy-shot}` (`Player`, `Wave`, `Enemy`, `EnemyKind` — type),
+`score` (`Kill`, `EnemyKind` — type),
 `battle-render → {art, enemy, enemy-art, enemy-shot, sprite, shot, ship}` (`Battle`, `Enemy`, `Player` — type),
 `main → {config, engine/*, game/levels, game/scenes/title-scene}`,
 `wave → {attack-director, enemy, enemy-shot, formation, levels}` (`Rng`, `EnemyEnv` — type),

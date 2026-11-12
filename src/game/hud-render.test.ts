@@ -131,6 +131,12 @@ describe('drawHud', () => {
     expect(sortedKeys(calls)).toEqual(sortedKeys(expected));
   });
 
+  it('draws at most LIVES_ICON_SLOTS icons', () => {
+    expect(draw({ ...BASE, lives: LIVES_ICON_SLOTS + 2 })).toEqual(
+      draw({ ...BASE, lives: LIVES_ICON_SLOTS }),
+    );
+  });
+
   it('uses label, value and icon colors in their places', () => {
     const calls = draw(BASE);
     const labelRow = calls.filter((c) => c.y >= HUD_LABEL_Y && c.y < HUD_LABEL_Y + GLYPH_HEIGHT);

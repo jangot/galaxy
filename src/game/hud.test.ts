@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCREEN_WIDTH } from '../config';
+import { SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
 import { LIFE_ICON_SPRITE } from './art';
 import { Battle } from './battle';
@@ -19,12 +19,11 @@ import {
   LIFE_ICON_STEP,
   LIVES_ICON_SLOTS,
   LIVES_ZONE,
-  PLACEHOLDER_LIVES,
-  PLACEHOLDER_SCORE,
   SCORE_DIGITS,
   SCORE_LABEL,
   SCORE_ZONE,
 } from './hud';
+import { MAX_LIVES, START_LIVES } from './player';
 import { TWO_LEVELS } from './test-levels';
 
 describe('formatting', () => {
@@ -41,18 +40,32 @@ describe('formatting', () => {
 });
 
 describe('hudView', () => {
-  it.each([1, 3])('shows the battle level %i with placeholder score and lives', (startLevel) => {
+  it.each([1, 3])("shows the battle level %i, score 0 and the player's lives", (startLevel) => {
     const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel });
     expect(hudView(battle)).toEqual({
       level: startLevel,
-      score: PLACEHOLDER_SCORE,
-      lives: PLACEHOLDER_LIVES,
+      score: 0,
+      lives: START_LIVES,
     });
   });
 
-  it('uses score 0 and 3 lives as placeholders', () => {
-    expect(PLACEHOLDER_SCORE).toBe(0);
-    expect(PLACEHOLDER_LIVES).toBe(3);
+  it("follows the player's lives", () => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    battle.player.hit();
+    expect(hudView(battle).lives).toBe(START_LIVES - 1);
+    expect(hudView(new Battle(createRng(1), { levels: TWO_LEVELS, lives: 5 })).lives).toBe(5);
+  });
+
+  it('follows the battle score', () => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    const fire = { move: 0, fire: true } as const;
+    battle.player.ship.x = 40; // shot column x = 47: the corner drone
+    battle.update(TICK_SECONDS, fire);
+    battle.player.shot!.y = 42;
+    battle.update(TICK_SECONDS, fire);
+    expect(battle.wave.enemies[0]!.state).toBe('exploding');
+    expect(hudView(battle).score).toBe(battle.score);
+    expect(hudView(battle).score).toBe(30);
   });
 });
 
@@ -118,6 +131,10 @@ describe('capacity', () => {
   ])('%s zone spans both text rows', (_name, zone) => {
     expect(zone.y).toBeLessThanOrEqual(HUD_LABEL_Y);
     expect(zone.y + zone.height).toBeGreaterThanOrEqual(HUD_VALUE_Y + GLYPH_HEIGHT);
+  });
+
+  it('has an icon slot for every life up to MAX_LIVES', () => {
+    expect(LIVES_ICON_SLOTS).toBeGreaterThanOrEqual(MAX_LIVES);
   });
 
   it('fits all lives icon slots', () => {
