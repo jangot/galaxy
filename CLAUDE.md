@@ -62,6 +62,9 @@
 сначала решает агент `architect`, владельцу — только то, что он не закрыл; приёмка
 глазами не останавливает прогон (`acceptance.md` в папке задачи).
 `/feature` и `/feature-review` — работа с записями фич.
+`/qa <задача>` — агент `tester` прогоняет кейсы приёмки в браузере (Claude in Chrome,
+dev-хуки `window.__galaxy`) и пишет `qa-report.md`; код не меняет, вкусовое оставляет
+владельцу.
 
 **Кто исполняет:** рабочие скилы `analyze`, `plan-implementation`, `do`, `fix-tests`,
 `commit` выполняет агент `developer` (`context: fork` в SKILL.md) — в изолированном

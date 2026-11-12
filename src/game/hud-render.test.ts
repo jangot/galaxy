@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { SCREEN_WIDTH } from '../config';
 import { HUD_LABEL_COLOR, HUD_VALUE_COLOR, LIFE_ICON_SPRITE } from './art';
+import type { PowerUps } from './bonus';
+import { NO_POWER_UPS } from './bonus';
+import { CAPSULE_SPRITES } from './bonus-art';
 import type { FillCall } from './canvas-test-utils';
 import { recorder } from './canvas-test-utils';
 import { drawText, GLYPH_HEIGHT } from './font';
@@ -18,13 +21,17 @@ import {
   LIFE_ICON_STEP,
   LIVES_ICON_SLOTS,
   LIVES_ZONE,
+  POWER_UP_SLOT_KINDS,
+  POWER_UP_SLOT_X,
+  POWER_UPS_ZONE,
   SCORE_LABEL,
   SCORE_ZONE,
 } from './hud';
 import { drawHud } from './hud-render';
 import { drawSprite } from './sprite';
 
-const BASE: HudView = { level: 1, score: 0, lives: 3 };
+const BASE: HudView = { level: 1, score: 0, lives: 3, powerUps: NO_POWER_UPS };
+const ALL: PowerUps = { fastShot: true, doubleShot: true };
 
 function draw(view: HudView): FillCall[] {
   const { ctx, calls } = recorder();
@@ -61,13 +68,23 @@ function inZone(c: FillCall, z: HudZone): boolean {
   return c.x >= z.x && c.x + c.w <= z.x + z.width && c.y >= z.y && c.y + c.h <= z.y + z.height;
 }
 
+/** Reference output: capsule sprites of the enabled kinds in their slots. */
+function iconCalls(powerUps: PowerUps): FillCall[] {
+  const { ctx, calls } = recorder();
+  for (const kind of POWER_UP_SLOT_KINDS) {
+    if (powerUps[kind])
+      drawSprite(ctx, CAPSULE_SPRITES[kind], POWER_UP_SLOT_X[kind], POWER_UPS_ZONE.y);
+  }
+  return calls;
+}
+
 /** Number of opaque pixels of the icon. */
 const ICON_PIXELS = LIFE_ICON_SPRITE.pixels.filter((p) => p != null).length;
 
 describe('drawHud', () => {
   it.each([
     ['base', BASE],
-    ['max', { level: 99999, score: 999999, lives: LIVES_ICON_SLOTS }],
+    ['max', { level: 99999, score: 999999, lives: LIVES_ICON_SLOTS, powerUps: ALL }],
   ])('draws only inside the HUD strip and its zones (%s)', (_name, view) => {
     const calls = draw(view);
     expect(calls.length).toBeGreaterThan(0);
@@ -87,6 +104,7 @@ describe('drawHud', () => {
     ['level', { ...BASE, level: 2 }, LEVEL_ZONE],
     ['score', { ...BASE, score: 123 }, SCORE_ZONE],
     ['lives', { ...BASE, lives: 2 }, LIVES_ZONE],
+    ['powerUps', { ...BASE, powerUps: ALL }, POWER_UPS_ZONE],
   ] as const)('a %s change touches only its own zone', (_name, changed, zone) => {
     const a = draw(BASE);
     const b = draw(changed);
@@ -167,6 +185,28 @@ describe('drawHud', () => {
             c.fillStyle === HUD_LABEL_COLOR && (inZone(c, SCORE_ZONE) || inZone(c, LEVEL_ZONE)),
         ),
       );
-    expect(labels({ level: 12, score: 4567, lives: 1 })).toEqual(labels(BASE));
+    expect(labels({ level: 12, score: 4567, lives: 1, powerUps: ALL })).toEqual(labels(BASE));
+  });
+
+  it('draws nothing in the power-ups zone without power-ups', () => {
+    expect(draw(BASE).filter((c) => inZone(c, POWER_UPS_ZONE))).toEqual([]);
+  });
+
+  it.each([
+    ['fastShot', { ...NO_POWER_UPS, fastShot: true }],
+    ['doubleShot', { ...NO_POWER_UPS, doubleShot: true }],
+    ['both', ALL],
+  ] as const)('draws only the enabled power-ups, each in its slot (%s)', (_name, powerUps) => {
+    const calls = draw({ ...BASE, powerUps }).filter((c) => inZone(c, POWER_UPS_ZONE));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(sortedKeys(calls)).toEqual(sortedKeys(iconCalls(powerUps)));
+  });
+
+  it('keeps the doubleShot icon in place with or without fastShot', () => {
+    const only = draw({ ...BASE, powerUps: { ...NO_POWER_UPS, doubleShot: true } });
+    const both = draw({ ...BASE, powerUps: ALL });
+    const fastOnly = draw({ ...BASE, powerUps: { ...NO_POWER_UPS, fastShot: true } });
+    // both = doubleShot alone + fastShot alone, as multisets (outside the zone nothing changes)
+    expect(sortedKeys(minus(both, fastOnly))).toEqual(sortedKeys(minus(only, draw(BASE))));
   });
 });

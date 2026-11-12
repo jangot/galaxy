@@ -1,4 +1,6 @@
 import { HUD_LABEL_COLOR, HUD_VALUE_COLOR, LIFE_ICON_SPRITE } from './art';
+import type { PowerUps } from './bonus';
+import { CAPSULE_SPRITES } from './bonus-art';
 import { drawText } from './font';
 import type { HudView, HudZone } from './hud';
 import {
@@ -12,19 +14,23 @@ import {
   LIFE_ICON_STEP,
   LIVES_ICON_SLOTS,
   LIVES_ZONE,
+  POWER_UP_SLOT_KINDS,
+  POWER_UP_SLOT_X,
+  POWER_UPS_ZONE,
   SCORE_LABEL,
   SCORE_ZONE,
 } from './hud';
 import { drawSprite } from './sprite';
 
 /**
- * Draws the top HUD over the scene, no background: score, level, lives sections.
+ * Draws the top HUD over the scene, no background: score, level, lives, power-ups sections.
  * Each section draws only inside its own zone (see hud.ts); a new section adds a drawX here.
  */
 export function drawHud(ctx: CanvasRenderingContext2D, view: HudView): void {
   drawScore(ctx, view.score);
   drawLevel(ctx, view.level);
   drawLives(ctx, view.lives);
+  drawPowerUps(ctx, view.powerUps);
 }
 
 /** Label on the label row at the zone's left edge, value under it at valueX. */
@@ -56,5 +62,14 @@ function drawLives(ctx: CanvasRenderingContext2D, lives: number): void {
   const count = Math.min(lives, LIVES_ICON_SLOTS);
   for (let i = 0; i < count; i++) {
     drawSprite(ctx, LIFE_ICON_SPRITE, rightmostX - i * LIFE_ICON_STEP, LIVES_ZONE.y);
+  }
+}
+
+/** Each enabled power-up as its capsule sprite in its fixed slot; a disabled one leaves it empty. */
+function drawPowerUps(ctx: CanvasRenderingContext2D, powerUps: PowerUps): void {
+  for (const kind of POWER_UP_SLOT_KINDS) {
+    if (powerUps[kind]) {
+      drawSprite(ctx, CAPSULE_SPRITES[kind], POWER_UP_SLOT_X[kind], POWER_UPS_ZONE.y);
+    }
   }
 }

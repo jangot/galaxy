@@ -3,11 +3,13 @@ import { TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
 import { SHIP_SPRITE, SHOT_COLOR } from './art';
 import { Battle } from './battle';
+import { ASTEROID_SPRITE, CAPSULE_SPRITES } from './bonus-art';
+import { ASTEROID_SPAWN_MIN_TICKS } from './bonus-field';
 import { BLINK_TICKS, drawBattle } from './battle-render';
 import type { FillCall } from './canvas-test-utils';
+import type { Rect } from './collisions';
 import { recorder } from './canvas-test-utils';
 import { ENEMY_KINDS, EXPLOSION_FRAME_TICKS, EXPLOSION_TICKS, PEEL_SEGMENTS } from './enemy';
-import type { Enemy } from './enemy';
 import { DRONE_SPRITE, ENEMY_SHOT_COLOR, EXPLOSION_FRAMES } from './enemy-art';
 import { ENEMY_SHOT_HEIGHT, ENEMY_SHOT_WIDTH } from './enemy-shot';
 import type { PlayerIntent } from './player';
@@ -16,6 +18,7 @@ import { SHIP_HEIGHT, SHIP_START_X, SHIP_WIDTH, SHIP_Y } from './ship';
 import { SHOT_HEIGHT, SHOT_WIDTH } from './shot';
 import type { Sprite } from './sprite';
 import { diveOrder, ONE_CORNER_ENEMY } from './test-levels';
+import { onlyShot } from './test-shots';
 
 /** Expected calls for a sprite at (x, y), built from the pixel data, not via drawSprite. */
 function spriteCalls(sprite: Sprite, x: number, y: number): FillCall[] {
@@ -52,13 +55,18 @@ const FIRE: PlayerIntent = { move: 0, fire: true };
 const RIGHT: PlayerIntent = { move: 1, fire: false };
 const IDLE: PlayerIntent = { move: 0, fire: false };
 
-/** Expected calls for an explosion frame centered in the enemy's rectangle. */
-function explosionCalls(enemy: Enemy, frame: Sprite): FillCall[] {
+/** Expected calls for an explosion frame centered in the rectangle (an enemy, the asteroid). */
+function explosionCalls(rect: Rect, frame: Sprite): FillCall[] {
   return spriteCalls(
     frame,
-    Math.floor(enemy.x) + Math.floor((enemy.width - frame.width) / 2),
-    Math.floor(enemy.y) + Math.floor((enemy.height - frame.height) / 2),
+    Math.floor(rect.x) + Math.floor((rect.width - frame.width) / 2),
+    Math.floor(rect.y) + Math.floor((rect.height - frame.height) / 2),
   );
+}
+
+/** A one-enemy battle with the bonus field on a stub rng: the asteroid spawns on tick 300. */
+function bonusBattle(): Battle {
+  return new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, bonuses: { rng: () => 0 } });
 }
 
 describe('drawBattle', () => {
@@ -72,12 +80,36 @@ describe('drawBattle', () => {
   it('draws the shot first, then the enemies, then the ship', () => {
     const battle = newBattle();
     battle.update(TICK_SECONDS, FIRE);
-    const shot = battle.player.shot;
+    const shot = onlyShot(battle.player);
     expect(shot).not.toBeNull();
     const { ctx, calls } = recorder();
     drawBattle(ctx, battle);
     expect(calls).toEqual([
       { fillStyle: SHOT_COLOR, x: shot!.x, y: shot!.y, w: SHOT_WIDTH, h: SHOT_HEIGHT },
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('with doubleShot draws both shots in shots order, then the enemies, then the ship', () => {
+    const battle = newBattle();
+    battle.player.grantPowerUp('doubleShot');
+    battle.update(TICK_SECONDS, FIRE);
+    battle.player.ship.x = 60;
+    battle.update(TICK_SECONDS, FIRE);
+    const shots = battle.player.shots;
+    expect(shots).toHaveLength(2);
+    expect(shots[0]!.x).not.toBe(shots[1]!.x);
+    const { ctx, calls } = recorder();
+    drawBattle(ctx, battle);
+    expect(calls).toEqual([
+      ...shots.map((s) => ({
+        fillStyle: SHOT_COLOR,
+        x: s.x,
+        y: s.y,
+        w: SHOT_WIDTH,
+        h: SHOT_HEIGHT,
+      })),
       ...enemyCalls(battle),
       ...shipCalls(battle.player.ship.x, SHIP_Y),
     ]);
@@ -96,7 +128,7 @@ describe('drawBattle', () => {
   it('floors fractional coordinates', () => {
     const battle = newBattle();
     battle.update(TICK_SECONDS, FIRE);
-    const shot = battle.player.shot!;
+    const shot = onlyShot(battle.player)!;
     shot.y += 0.5;
     battle.player.ship.x = 10.5;
     const { ctx, calls } = recorder();
@@ -264,7 +296,7 @@ describe('drawBattle ship states', () => {
     battle.update(TICK_SECONDS, FIRE);
     battle.player.hit();
     battle.update(TICK_SECONDS, IDLE);
-    const shot = battle.player.shot!;
+    const shot = onlyShot(battle.player)!;
     expect(shot).not.toBeNull();
     expect(battle.player.stateTicks).toBe(1);
     expect(draw(battle)).toEqual([
@@ -306,8 +338,7 @@ describe('drawBattle enemy shots', () => {
   const P = PEEL_SEGMENTS.reduce((sum, s) => sum + s.ticks, 0);
 
   /** The only enemy dives with one shot; its shot appears on the last of P + 1 ticks. */
-  function battleWithEnemyShot(lastIntent: PlayerIntent = IDLE): Battle {
-    const battle = newBattle();
+  function battleWithEnemyShot(lastIntent: PlayerIntent = IDLE, battle = newBattle()): Battle {
     battle.wave.enemies[0]!.startDive(diveOrder({ shots: 1 }));
     run(battle, P);
     battle.update(TICK_SECONDS, lastIntent);
@@ -334,9 +365,67 @@ describe('drawBattle enemy shots', () => {
   it('draws enemy shots, the player shot, enemies, then the ship', () => {
     const battle = battleWithEnemyShot(FIRE);
     const s = battle.wave.shots[0]!;
-    const shot = battle.player.shot!;
+    const shot = onlyShot(battle.player)!;
     expect(shot).not.toBeNull();
     expect(draw(battle)).toEqual([
+      {
+        fillStyle: ENEMY_SHOT_COLOR,
+        x: Math.floor(s.x),
+        y: Math.floor(s.y),
+        w: ENEMY_SHOT_WIDTH,
+        h: ENEMY_SHOT_HEIGHT,
+      },
+      {
+        fillStyle: SHOT_COLOR,
+        x: Math.floor(shot.x),
+        y: Math.floor(shot.y),
+        w: SHOT_WIDTH,
+        h: SHOT_HEIGHT,
+      },
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws the asteroid behind everything: asteroid, enemy shots, player shot, enemies, ship', () => {
+    const battle = battleWithEnemyShot(FIRE, asteroidBattle());
+    const asteroid = battle.bonuses!.asteroid!;
+    expect(asteroid.state).toBe('flying');
+    const s = battle.wave.shots[0]!;
+    const shot = onlyShot(battle.player)!;
+    expect(shot).not.toBeNull();
+    expect(draw(battle)).toEqual([
+      ...spriteCalls(ASTEROID_SPRITE, Math.floor(asteroid.x), Math.floor(asteroid.y)),
+      {
+        fillStyle: ENEMY_SHOT_COLOR,
+        x: Math.floor(s.x),
+        y: Math.floor(s.y),
+        w: ENEMY_SHOT_WIDTH,
+        h: ENEMY_SHOT_HEIGHT,
+      },
+      {
+        fillStyle: SHOT_COLOR,
+        x: Math.floor(shot.x),
+        y: Math.floor(shot.y),
+        w: SHOT_WIDTH,
+        h: SHOT_HEIGHT,
+      },
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws the capsule over the asteroid explosion and under the enemy shots', () => {
+    const battle = battleWithEnemyShot(FIRE, asteroidBattle());
+    const asteroid = battle.bonuses!.asteroid!;
+    expect(battle.bonuses!.hitAsteroid()).toBe(true);
+    const capsule = battle.bonuses!.capsule!;
+    const s = battle.wave.shots[0]!;
+    const shot = onlyShot(battle.player)!;
+    expect(shot).not.toBeNull();
+    expect(draw(battle)).toEqual([
+      ...explosionCalls(asteroid, EXPLOSION_FRAMES[0]!),
+      ...spriteCalls(CAPSULE_SPRITES[capsule.kind], capsule.x, capsule.y),
       {
         fillStyle: ENEMY_SHOT_COLOR,
         x: Math.floor(s.x),
@@ -359,5 +448,80 @@ describe('drawBattle enemy shots', () => {
   it('the enemy shot color differs from the player shot and the ship', () => {
     expect(ENEMY_SHOT_COLOR).not.toBe(SHOT_COLOR);
     expect(SHIP_SPRITE.pixels).not.toContain(ENEMY_SHOT_COLOR);
+  });
+});
+
+/** bonusBattle run up to the asteroid's spawn: it is flying at its start position. */
+function asteroidBattle(): Battle {
+  const battle = bonusBattle();
+  run(battle, ASTEROID_SPAWN_MIN_TICKS);
+  expect(battle.bonuses!.asteroid).not.toBeNull();
+  return battle;
+}
+
+describe('drawBattle asteroid', () => {
+  it('draws a flying asteroid at floored coordinates first, then enemies and the ship', () => {
+    const battle = asteroidBattle();
+    const asteroid = battle.bonuses!.asteroid!;
+    asteroid.x = 100.5;
+    asteroid.y = 50.75;
+    expect(draw(battle)).toEqual([
+      ...spriteCalls(ASTEROID_SPRITE, 100, 50),
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws nothing extra before the asteroid spawns', () => {
+    expect(draw(bonusBattle())).toEqual(draw(newBattle()));
+  });
+
+  it('an exploding asteroid shows the explosion frames centered in it', () => {
+    const battle = asteroidBattle();
+    const asteroid = battle.bonuses!.asteroid!;
+    asteroid.hit();
+    expect(draw(battle)).toEqual([
+      ...explosionCalls(asteroid, EXPLOSION_FRAMES[0]!),
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+    run(battle, EXPLOSION_FRAME_TICKS);
+    expect(asteroid.state).toBe('exploding');
+    expect(draw(battle)).toEqual([
+      ...explosionCalls(asteroid, EXPLOSION_FRAMES[1]!),
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws the capsule of the broken asteroid over its explosion, at floored coordinates', () => {
+    const battle = asteroidBattle();
+    const asteroid = battle.bonuses!.asteroid!;
+    asteroid.x = 100.5;
+    asteroid.y = 50;
+    expect(battle.bonuses!.hitAsteroid()).toBe(true);
+    // The stub rng () => 0 gives a 'life' asteroid; the sprite follows capsule.kind.
+    expect(battle.bonuses!.capsule!.kind).toBe(asteroid.bonus);
+    expect(draw(battle)).toEqual([
+      ...explosionCalls(asteroid, EXPLOSION_FRAMES[0]!),
+      ...spriteCalls(CAPSULE_SPRITES[asteroid.bonus], 102, 52),
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws the capsule alone once the asteroid is gone', () => {
+    const battle = asteroidBattle();
+    const asteroid = battle.bonuses!.asteroid!;
+    asteroid.x = 100.5;
+    asteroid.y = 50;
+    battle.bonuses!.hitAsteroid();
+    run(battle, EXPLOSION_TICKS);
+    expect(battle.bonuses!.asteroid).toBeNull();
+    expect(draw(battle)).toEqual([
+      ...spriteCalls(CAPSULE_SPRITES[asteroid.bonus], 102, 52 + EXPLOSION_TICKS),
+      ...enemyCalls(battle),
+      ...shipCalls(battle.player.ship.x, SHIP_Y),
+    ]);
   });
 });

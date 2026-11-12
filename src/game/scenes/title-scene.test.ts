@@ -61,7 +61,7 @@ describe('TitleScene', () => {
   it('starts the game from the given level', () => {
     const input = new Input();
     input.press('start');
-    const next = step(new TitleScene(createRng(1), 2), input);
+    const next = step(new TitleScene(createRng(1), { startLevel: 2 }), input);
     expect(next).toBeInstanceOf(PlayScene);
     expect((next as PlayScene).battle.level).toBe(2);
   });
@@ -108,10 +108,25 @@ describe('TitleScene', () => {
 
   it('keeps the start level across a restart', () => {
     const input = new Input();
-    const game = startGame(new TitleScene(createRng(1), 2), input);
+    const game = startGame(new TitleScene(createRng(1), { startLevel: 2 }), input);
     expect(game.battle.level).toBe(2);
     loseGame(game, input);
     const next = startGame(backToTitle(game, input), input);
     expect(next.battle.level).toBe(2);
+  });
+
+  it('starts the game with the given lives and keeps them across a restart', () => {
+    const input = new Input();
+    const game = startGame(new TitleScene(createRng(1), { lives: 1 }), input);
+    expect(game.battle.player.lives).toBe(1);
+    loseGame(game, input);
+    const next = startGame(backToTitle(game, input), input);
+    expect(next.battle.player.lives).toBe(1);
+  });
+
+  it('combines the start level and lives', () => {
+    const game = startGame(new TitleScene(createRng(1), { startLevel: 2, lives: 5 }), new Input());
+    expect(game.battle.level).toBe(2);
+    expect(game.battle.player.lives).toBe(5);
   });
 });

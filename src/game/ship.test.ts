@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import { SHIP_SPRITE } from './art';
 import { SHIP_HEIGHT, SHIP_SPEED, SHIP_START_X, SHIP_WIDTH, SHIP_Y, Ship } from './ship';
-import { SHOT_HEIGHT, SHOT_WIDTH } from './shot';
+import { FAST_SHOT_SPEED, SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH } from './shot';
 
 const STEP = SHIP_SPEED * TICK_SECONDS;
 const MAX_X = SCREEN_WIDTH - SHIP_WIDTH;
@@ -123,5 +123,17 @@ describe('Ship', () => {
   it('returns a new shot on every call', () => {
     const ship = new Ship();
     expect(ship.spawnShot()).not.toBe(ship.spawnShot());
+  });
+
+  it('spawns a shot at SHOT_SPEED by default', () => {
+    expect(new Ship().spawnShot().speed).toBe(SHOT_SPEED);
+  });
+
+  it('spawns a shot at the given speed from the same spot', () => {
+    const ship = new Ship(100);
+    const plain = ship.spawnShot();
+    const fast = ship.spawnShot(FAST_SHOT_SPEED);
+    expect(fast.speed).toBe(FAST_SHOT_SPEED);
+    expect({ x: fast.x, y: fast.y }).toEqual({ x: plain.x, y: plain.y });
   });
 });

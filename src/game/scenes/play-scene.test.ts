@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { SCREEN_WIDTH, TICK_SECONDS } from '../../config';
+import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../../config';
 import { Input } from '../../engine/input';
 import { createRng } from '../../engine/rng';
 import type { Scene } from '../../engine/scene';
 import { Battle, GAME_OVER_DELAY_TICKS } from '../battle';
+import { BONUS_KINDS } from '../bonus';
+import { ASTEROID_SPAWN_MAX_TICKS, ASTEROID_SPAWN_MIN_TICKS } from '../bonus-field';
 import { recorder } from '../canvas-test-utils';
 import { drawGameOver } from '../game-over-render';
 import { Player } from '../player';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y, Ship } from '../ship';
 import { SHOT_HEIGHT, SHOT_SPEED } from '../shot';
+import { Starfield } from '../starfield';
 import { ONE_CORNER_ENEMY, TWO_LEVELS } from '../test-levels';
 import { PlayScene } from './play-scene';
 import { step } from './scene-test-utils';
+import { onlyShot } from '../test-shots';
 
 const STEP = SHIP_SPEED * TICK_SECONDS;
 /** Ticks after launch while the shot is still on screen (y reaches exactly 0). */
@@ -110,7 +114,7 @@ describe('PlayScene', () => {
   it('does not fire without the fire key', () => {
     const scene = newScene();
     step(scene, new Input(), 10);
-    expect(scene.battle.player.shot).toBeNull();
+    expect(onlyShot(scene.battle.player)).toBeNull();
   });
 
   it('fires when the fire key goes down', () => {
@@ -118,7 +122,7 @@ describe('PlayScene', () => {
     const input = new Input();
     input.press('fire');
     step(scene, input, 1);
-    expect(scene.battle.player.shot).not.toBeNull();
+    expect(onlyShot(scene.battle.player)).not.toBeNull();
   });
 
   it('does not autofire while the key is held, fires again on a new press', () => {
@@ -126,20 +130,20 @@ describe('PlayScene', () => {
     const input = new Input();
     input.press('fire');
     step(scene, input, 1);
-    const first = scene.battle.player.shot;
+    const first = onlyShot(scene.battle.player);
     expect(first).not.toBeNull();
     step(scene, input, TICKS_ON_SCREEN);
-    expect(scene.battle.player.shot).toBe(first);
+    expect(onlyShot(scene.battle.player)).toBe(first);
     step(scene, input, 1);
-    expect(scene.battle.player.shot).toBeNull();
+    expect(onlyShot(scene.battle.player)).toBeNull();
     step(scene, input, 30);
-    expect(scene.battle.player.shot).toBeNull();
+    expect(onlyShot(scene.battle.player)).toBeNull();
 
     input.release('fire');
     input.press('fire');
     step(scene, input, 1);
-    expect(scene.battle.player.shot).not.toBeNull();
-    expect(scene.battle.player.shot).not.toBe(first);
+    expect(onlyShot(scene.battle.player)).not.toBeNull();
+    expect(onlyShot(scene.battle.player)).not.toBe(first);
   });
 
   it('ignores a press while the shot is in flight', () => {
@@ -147,12 +151,12 @@ describe('PlayScene', () => {
     const input = new Input();
     input.press('fire');
     step(scene, input, 1);
-    const first = scene.battle.player.shot;
+    const first = onlyShot(scene.battle.player);
     step(scene, input, 10);
     input.release('fire');
     input.press('fire');
     step(scene, input, 1);
-    expect(scene.battle.player.shot).toBe(first);
+    expect(onlyShot(scene.battle.player)).toBe(first);
   });
 
   it('builds the level 1 wave', () => {
@@ -176,11 +180,11 @@ describe('PlayScene', () => {
     const input = new Input();
     input.press('fire');
     step(scene, input, 41);
-    expect(scene.battle.player.shot).not.toBeNull();
-    expect(scene.battle.player.shot!.x).toBe(57);
+    expect(onlyShot(scene.battle.player)).not.toBeNull();
+    expect(onlyShot(scene.battle.player)!.x).toBe(57);
     expect(enemy.state).toBe('formation');
     step(scene, input, 1);
-    expect(scene.battle.player.shot).toBeNull();
+    expect(onlyShot(scene.battle.player)).toBeNull();
     expect(enemy.state).toBe('exploding');
   });
 
@@ -249,5 +253,61 @@ describe('PlayScene', () => {
       scene.render(ctx);
       expect(calls.slice(-n)).not.toEqual(expected.calls);
     });
+  });
+});
+
+describe('PlayScene bonuses', () => {
+  it('gives the battle a bonus field with a spawn tick in the window, the same for one seed', () => {
+    const a = new PlayScene(createRng(1));
+    const b = new PlayScene(createRng(1));
+    const field = a.battle.bonuses;
+    expect(field).not.toBeNull();
+    expect(field!.spawnTick).toBeGreaterThanOrEqual(ASTEROID_SPAWN_MIN_TICKS);
+    expect(field!.spawnTick).toBeLessThanOrEqual(ASTEROID_SPAWN_MAX_TICKS);
+    expect(b.battle.bonuses!.spawnTick).toBe(field!.spawnTick);
+  });
+
+  it('keeps a passed opts.bonuses', () => {
+    const scene = new PlayScene(createRng(1), undefined, {
+      levels: ONE_CORNER_ENEMY,
+      bonuses: { rng: () => 0 },
+    });
+    const input = new Input();
+    step(scene, input, 299);
+    expect(scene.battle.bonuses!.asteroid).toBeNull();
+    step(scene, input, 1);
+    const asteroid = scene.battle.bonuses!.asteroid!;
+    expect(asteroid).not.toBeNull();
+    expect(asteroid.x).toBe(244);
+    expect(asteroid.bonus).toBe(BONUS_KINDS[0]);
+  });
+
+  it('makes exactly the scene rng calls it made before bonuses', () => {
+    const rng = createRng(1);
+    new PlayScene(rng);
+    const ref = createRng(1);
+    new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, ref);
+    ref();
+    expect(rng()).toBe(ref());
+  });
+
+  it('for a given seed the stars and the battle go as before bonuses', () => {
+    const scene = new PlayScene(createRng(1));
+    // The old scheme: stars, then the battle seed, no bonus field.
+    const ref = createRng(1);
+    const refStars = new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, ref);
+    const refBattle = new Battle(createRng(Math.floor(ref() * 2 ** 32)));
+    const input = new Input();
+    for (let i = 0; i < 1200; i++) {
+      step(scene, input);
+      refStars.update(TICK_SECONDS);
+      refBattle.update(TICK_SECONDS, { move: 0, fire: false });
+    }
+    // 1200 ticks at 0.4 px/tick: every star has restarted at least once.
+    expect(scene.starfield.stars).toEqual(refStars.stars);
+    const enemies = (b: Battle) => b.wave.enemies.map((e) => [e.x, e.y, e.state]);
+    expect(enemies(scene.battle)).toEqual(enemies(refBattle));
+    expect(scene.battle.player.state).toBe(refBattle.player.state);
+    expect(scene.battle.player.lives).toBe(refBattle.player.lives);
   });
 });
