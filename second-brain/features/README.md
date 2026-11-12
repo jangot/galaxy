@@ -20,3 +20,4 @@
 | 003 | Полёт пикирующих врагов             | готова | [003-enemy-flight/](003-enemy-flight/README.md)                   |
 | 004 | Верхняя информационная панель (HUD) | готова | [004-hud/](004-hud/README.md)                                     |
 | 005 | Жизни, счёт и Game Over             | готова | [005-lives-score-game-over/](005-lives-score-game-over/README.md) |
+| 006 | Астероиды с бонусами                | готова | [006-asteroid-bonuses/](006-asteroid-bonuses/README.md)           |

@@ -1,4 +1,6 @@
-export type Action = 'left' | 'right' | 'up' | 'down' | 'fire' | 'start';
+/** All game actions; the order is for messages only. */
+export const ACTIONS = ['left', 'right', 'up', 'down', 'fire', 'start'] as const;
+export type Action = (typeof ACTIONS)[number];
 
 const DEFAULT_BINDINGS: Record<string, Action> = {
   ArrowLeft: 'left',

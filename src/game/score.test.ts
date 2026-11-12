@@ -3,11 +3,15 @@ import type { Kill } from './collisions';
 import type { EnemyKind } from './levels';
 import { LEVELS, parseLayout } from './levels';
 import {
+  ASTEROID_POINTS,
+  asteroidPoints,
+  BONUS_FALLBACK_POINTS,
   ENEMY_POINTS,
   EXTRA_LIFE_EVERY,
   EXTRA_LIFE_FIRST,
   extraLivesEarned,
   killPoints,
+  levelPoints,
 } from './score';
 
 const kill = (kind: EnemyKind, inFlight: boolean): Kill => ({ kind, inFlight });
@@ -104,6 +108,78 @@ describe('killPoints', () => {
   it('throws RangeError on a level that is not an integer >= 1', () => {
     expect(() => killPoints(kill('drone', false), 0)).toThrow(RangeError);
     expect(() => killPoints(kill('drone', false), 1.5)).toThrow(RangeError);
+  });
+});
+
+describe('levelPoints', () => {
+  it.each([
+    [30, 2, 30],
+    [30, 5, 40],
+    [30, 6, 50],
+    [60, 11, 120],
+    [80, 6, 120],
+    [50, 14, 120],
+    [100, 5, 140],
+    [100, 11, 200],
+  ])('base %i on level %i: %i', (base, level, expected) => {
+    expect(levelPoints(base, level)).toBe(expected);
+  });
+
+  it('returns the base on level 1', () => {
+    for (const kind of KINDS) {
+      expect(levelPoints(ENEMY_POINTS[kind].formation, 1)).toBe(ENEMY_POINTS[kind].formation);
+      expect(levelPoints(ENEMY_POINTS[kind].flying, 1)).toBe(ENEMY_POINTS[kind].flying);
+    }
+    expect(levelPoints(ASTEROID_POINTS, 1)).toBe(ASTEROID_POINTS);
+  });
+
+  it('throws RangeError on a level that is not an integer >= 1', () => {
+    expect(() => levelPoints(30, 0)).toThrow(RangeError);
+    expect(() => levelPoints(30, 1.5)).toThrow(RangeError);
+  });
+
+  it('agrees with killPoints for every kind, flight and level 1..30', () => {
+    for (const kind of KINDS) {
+      for (const inFlight of [false, true]) {
+        const base = inFlight ? ENEMY_POINTS[kind].flying : ENEMY_POINTS[kind].formation;
+        for (let level = 1; level <= 30; level++) {
+          expect(killPoints(kill(kind, inFlight), level)).toBe(levelPoints(base, level));
+        }
+      }
+    }
+  });
+});
+
+describe('asteroidPoints', () => {
+  it('has the owner base В7', () => {
+    expect(ASTEROID_POINTS).toBe(100);
+  });
+
+  it('gives 100 on level 1 and 140 on level 5', () => {
+    expect(asteroidPoints(1)).toBe(100);
+    expect(asteroidPoints(5)).toBe(140);
+  });
+
+  it('is a multiple of 10 and never decreases with the level', () => {
+    let previous = 0;
+    for (let level = 1; level <= 30; level++) {
+      const points = asteroidPoints(level);
+      expect(points % 10).toBe(0);
+      expect(points).toBeGreaterThanOrEqual(previous);
+      previous = points;
+    }
+  });
+
+  it('throws RangeError on level 0', () => {
+    expect(() => asteroidPoints(0)).toThrow(RangeError);
+  });
+});
+
+describe('BONUS_FALLBACK_POINTS', () => {
+  it('is a flat 500, a positive multiple of 10 (В8)', () => {
+    expect(BONUS_FALLBACK_POINTS).toBe(500);
+    expect(BONUS_FALLBACK_POINTS).toBeGreaterThan(0);
+    expect(BONUS_FALLBACK_POINTS % 10).toBe(0);
   });
 });
 

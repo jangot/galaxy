@@ -3,6 +3,8 @@ import { SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
 import { LIFE_ICON_SPRITE } from './art';
 import { Battle } from './battle';
+import { NO_POWER_UPS } from './bonus';
+import { CAPSULE_SPRITES } from './bonus-art';
 import { CHAR_ADVANCE, GLYPH_HEIGHT, textWidth } from './font';
 import {
   formatLevel,
@@ -19,12 +21,16 @@ import {
   LIFE_ICON_STEP,
   LIVES_ICON_SLOTS,
   LIVES_ZONE,
+  POWER_UP_SLOT_KINDS,
+  POWER_UP_SLOT_X,
+  POWER_UPS_ZONE,
   SCORE_DIGITS,
   SCORE_LABEL,
   SCORE_ZONE,
 } from './hud';
 import { MAX_LIVES, START_LIVES } from './player';
 import { TWO_LEVELS } from './test-levels';
+import { onlyShot } from './test-shots';
 
 describe('formatting', () => {
   it('pads the score to six digits and keeps longer numbers whole', () => {
@@ -40,14 +46,18 @@ describe('formatting', () => {
 });
 
 describe('hudView', () => {
-  it.each([1, 3])("shows the battle level %i, score 0 and the player's lives", (startLevel) => {
-    const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel });
-    expect(hudView(battle)).toEqual({
-      level: startLevel,
-      score: 0,
-      lives: START_LIVES,
-    });
-  });
+  it.each([1, 3])(
+    "shows the battle level %i, score 0, the player's lives and no power-ups",
+    (startLevel) => {
+      const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel });
+      expect(hudView(battle)).toEqual({
+        level: startLevel,
+        score: 0,
+        lives: START_LIVES,
+        powerUps: NO_POWER_UPS,
+      });
+    },
+  );
 
   it("follows the player's lives", () => {
     const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
@@ -61,11 +71,25 @@ describe('hudView', () => {
     const fire = { move: 0, fire: true } as const;
     battle.player.ship.x = 40; // shot column x = 47: the corner drone
     battle.update(TICK_SECONDS, fire);
-    battle.player.shot!.y = 42;
+    onlyShot(battle.player)!.y = 42;
     battle.update(TICK_SECONDS, fire);
     expect(battle.wave.enemies[0]!.state).toBe('exploding');
     expect(hudView(battle).score).toBe(battle.score);
     expect(hudView(battle).score).toBe(30);
+  });
+
+  it.each(['fastShot', 'doubleShot'] as const)("follows the player's power-up %s", (kind) => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    battle.player.grantPowerUp(kind);
+    expect(hudView(battle).powerUps).toEqual({ ...NO_POWER_UPS, [kind]: true });
+  });
+
+  it('shows both power-ups and keeps them after a hit', () => {
+    const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
+    battle.player.grantPowerUp('fastShot');
+    battle.player.grantPowerUp('doubleShot');
+    battle.player.hit();
+    expect(hudView(battle).powerUps).toEqual({ fastShot: true, doubleShot: true });
   });
 });
 
@@ -100,6 +124,15 @@ describe('layout', () => {
     // apex, top y = 29 (drone row 0: slot y 34, 4 px up, frame 9 px tall centered -> -1).
     // <= 28 keeps at least 1 px between the HUD and it; a limit for future sections too.
     expect(HUD_HEIGHT).toBeLessThanOrEqual(28);
+  });
+
+  it('includes the power-ups zone', () => {
+    expect(HUD_ZONES).toContain(POWER_UPS_ZONE);
+  });
+
+  it('puts the power-ups zone on the value row', () => {
+    expect(POWER_UPS_ZONE.y).toBe(HUD_VALUE_Y);
+    expect(POWER_UPS_ZONE.height).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
   });
 
   it('keeps the label row above the value row', () => {
@@ -151,5 +184,31 @@ describe('lives icon', () => {
     expect(LIFE_ICON_SPRITE.height).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
     expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(LIFE_ICON_STEP);
     expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(8); // owner's decision: icon at most 8×8
+  });
+});
+
+describe('power-up icons', () => {
+  it('has exactly one slot for every power-up', () => {
+    expect([...POWER_UP_SLOT_KINDS].sort()).toEqual(Object.keys(NO_POWER_UPS).sort());
+  });
+
+  it.each(POWER_UP_SLOT_KINDS)('keeps the %s slot inside the zone', (kind) => {
+    const x = POWER_UP_SLOT_X[kind];
+    expect(Number.isInteger(x)).toBe(true);
+    expect(x).toBeGreaterThanOrEqual(POWER_UPS_ZONE.x);
+    expect(x + LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(POWER_UPS_ZONE.x + POWER_UPS_ZONE.width);
+  });
+
+  it('keeps the slots apart', () => {
+    for (let i = 1; i < POWER_UP_SLOT_KINDS.length; i++) {
+      const prev = POWER_UP_SLOT_X[POWER_UP_SLOT_KINDS[i - 1]!];
+      const next = POWER_UP_SLOT_X[POWER_UP_SLOT_KINDS[i]!];
+      expect(next - prev).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
+    }
+  });
+
+  it.each(POWER_UP_SLOT_KINDS)('fits the %s capsule sprite into a slot', (kind) => {
+    expect(CAPSULE_SPRITES[kind].width).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
+    expect(CAPSULE_SPRITES[kind].height).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
   });
 });

@@ -1,6 +1,6 @@
 import { SCREEN_WIDTH } from '../config';
 import { SHIP_SPRITE } from './art';
-import { SHOT_HEIGHT, SHOT_WIDTH, Shot } from './shot';
+import { SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH, Shot } from './shot';
 
 /** Ship size is derived from its sprite so the hitbox never drifts from the picture. */
 export const SHIP_WIDTH = SHIP_SPRITE.width;
@@ -31,9 +31,12 @@ export class Ship {
     this.x = Math.min(Math.max(next, 0), MAX_X);
   }
 
-  /** Creates a shot centered on the nose, its bottom touching the top of the ship. */
-  spawnShot(): Shot {
+  /**
+   * Creates a shot centered on the nose, its bottom touching the top of the ship.
+   * `speed` defaults to SHOT_SPEED.
+   */
+  spawnShot(speed: number = SHOT_SPEED): Shot {
     const x = this.x + Math.floor(SHIP_WIDTH / 2) - Math.floor(SHOT_WIDTH / 2);
-    return new Shot(x, this.y - SHOT_HEIGHT);
+    return new Shot(x, this.y - SHOT_HEIGHT, speed);
   }
 }

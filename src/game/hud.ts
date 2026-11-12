@@ -1,5 +1,6 @@
 import { SCREEN_WIDTH } from '../config';
 import type { Battle } from './battle';
+import type { PowerUpKind, PowerUps } from './bonus';
 import { CHAR_ADVANCE, GLYPH_HEIGHT, textWidth } from './font';
 
 /** Data shown by the HUD; a pure snapshot built from the battle each frame. */
@@ -8,6 +9,8 @@ export interface HudView {
   readonly score: number;
   /** Total lives including the ship on the field. */
   readonly lives: number;
+  /** Enabled power-ups; each one lights its own fixed slot until the game ends. */
+  readonly powerUps: PowerUps;
 }
 
 /** A section's rectangle in logical px (half-open: x...x+width, y...y+height). */
@@ -69,12 +72,42 @@ export const LIVES_ZONE: HudZone = {
   height: LIFE_ICON_MAX_SIZE,
 };
 
-/** All section zones, for the overlap test; a new section adds its zone here. */
-export const HUD_ZONES: readonly HudZone[] = [SCORE_ZONE, LEVEL_ZONE, LIVES_ZONE];
+/** Power-up slots left to right; every PowerUpKind has exactly one slot. */
+export const POWER_UP_SLOT_KINDS: readonly PowerUpKind[] = ['fastShot', 'doubleShot'];
 
-/** Builds the HUD snapshot from the battle: level, score and lives. */
+const POWER_UPS_ZONE_WIDTH = LIFE_ICON_STEP + LIFE_ICON_MAX_SIZE; // 18: two slots
+
+/**
+ * x = 156...173, y = 14...21: value row between the level (ends at 147) and the lives
+ * (start at 200). No label: the label row above stays empty.
+ */
+export const POWER_UPS_ZONE: HudZone = {
+  x: 156,
+  y: HUD_VALUE_Y,
+  width: POWER_UPS_ZONE_WIDTH,
+  height: LIFE_ICON_MAX_SIZE,
+};
+
+/** Fixed slot x per power-up: an icon never moves when the other one arrives. */
+export const POWER_UP_SLOT_X: Readonly<Record<PowerUpKind, number>> = {
+  fastShot: POWER_UPS_ZONE.x,
+  doubleShot: POWER_UPS_ZONE.x + LIFE_ICON_STEP,
+};
+
+/** All section zones, for the overlap test; a new section adds its zone here. */
+export const HUD_ZONES: readonly HudZone[] = [SCORE_ZONE, LEVEL_ZONE, LIVES_ZONE, POWER_UPS_ZONE];
+
+/**
+ * Builds the HUD snapshot from the battle: level, score, lives and power-ups. The
+ * power-ups object is the player's immutable snapshot (grantPowerUp replaces it).
+ */
 export function hudView(battle: Battle): HudView {
-  return { level: battle.level, score: battle.score, lives: battle.player.lives };
+  return {
+    level: battle.level,
+    score: battle.score,
+    lives: battle.player.lives,
+    powerUps: battle.player.powerUps,
+  };
 }
 
 /** Zero-padded to SCORE_DIGITS; longer numbers are kept whole. Expects an integer >= 0. */

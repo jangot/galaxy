@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TICK_SECONDS } from '../config';
 import { Input } from '../engine/input';
+import { NO_POWER_UPS } from './bonus';
 import type { PlayerIntent } from './player';
 import {
   DOWN_TICKS,
@@ -11,8 +12,8 @@ import {
   START_LIVES,
 } from './player';
 import { SHIP_SPEED, SHIP_START_X, SHIP_WIDTH, Ship } from './ship';
-import type { Shot } from './shot';
-import { SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH } from './shot';
+import { FAST_SHOT_SPEED, SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH, Shot } from './shot';
+import { onlyShot } from './test-shots';
 
 const STEP = SHIP_SPEED * TICK_SECONDS;
 const SHOT_STEP = SHOT_SPEED * TICK_SECONDS;
@@ -24,7 +25,7 @@ const RIGHT_FIRE = { move: 1, fire: true } as const;
 const LAST_ON_SCREEN_Y = -SHOT_HEIGHT + 1;
 
 function requireShot(player: Player): Shot {
-  const { shot } = player;
+  const shot = onlyShot(player);
   if (!shot) throw new Error('expected a shot in flight');
   return shot;
 }
@@ -104,13 +105,13 @@ describe('Player', () => {
 
 describe('Player shot', () => {
   it('starts with no shot', () => {
-    expect(new Player().shot).toBeNull();
+    expect(onlyShot(new Player())).toBeNull();
   });
 
   it('does not fire without the fire intent', () => {
     const player = new Player();
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('launches a shot from the nose, not moved on the launch tick', () => {
@@ -133,7 +134,7 @@ describe('Player shot', () => {
     const first = requireShot(player);
     const y0 = first.y;
     player.update(TICK_SECONDS, FIRE);
-    expect(player.shot).toBe(first);
+    expect(onlyShot(player)).toBe(first);
     expect(first.y).toBe(y0 - SHOT_STEP);
   });
 
@@ -143,9 +144,9 @@ describe('Player shot', () => {
     player.update(TICK_SECONDS, FIRE);
     requireShot(player).y = LAST_ON_SCREEN_Y;
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('drops the shot once it leaves the screen', () => {
@@ -153,7 +154,7 @@ describe('Player shot', () => {
     player.update(TICK_SECONDS, FIRE);
     requireShot(player).y = LAST_ON_SCREEN_Y;
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('keeps the shot while any part of it is on screen', () => {
@@ -188,18 +189,172 @@ describe('Player shot', () => {
     const player = new Player();
     player.update(TICK_SECONDS, FIRE);
     const first = requireShot(player);
-    player.removeShot();
-    expect(player.shot).toBeNull();
+    player.removeShot(first);
+    expect(onlyShot(player)).toBeNull();
     player.update(TICK_SECONDS, FIRE);
     const second = requireShot(player);
     expect(second).not.toBe(first);
     expect({ x: second.x, y: second.y }).toEqual(muzzleOf(player.ship));
   });
 
-  it('removeShot() without a shot does nothing', () => {
+  it('removeShot() ignores an unknown shot', () => {
     const player = new Player();
-    player.removeShot();
-    expect(player.shot).toBeNull();
+    player.removeShot(new Shot(0, 0));
+    expect(onlyShot(player)).toBeNull();
+    player.update(TICK_SECONDS, FIRE);
+    const shot = requireShot(player);
+    player.removeShot(new Shot(0, 0));
+    expect(onlyShot(player)).toBe(shot);
+  });
+});
+
+describe('Player power-ups', () => {
+  const FAST_STEP = FAST_SHOT_SPEED * TICK_SECONDS;
+
+  function doublePlayer(): Player {
+    const player = new Player();
+    player.grantPowerUp('doubleShot');
+    return player;
+  }
+
+  it('starts with no power-ups, one shot slot and no shots', () => {
+    const player = new Player();
+    expect(player.powerUps).toEqual(NO_POWER_UPS);
+    expect(player.maxShots).toBe(1);
+    expect(player.shots).toEqual([]);
+  });
+
+  it('doubleShot gives a second shot slot', () => {
+    const player = new Player();
+    expect(player.grantPowerUp('doubleShot')).toBe(true);
+    expect(player.maxShots).toBe(2);
+    expect(player.powerUps.doubleShot).toBe(true);
+  });
+
+  it('with doubleShot fires two shots, oldest first, and ignores a third fire', () => {
+    const player = doublePlayer();
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    expect(player.shots).toHaveLength(2);
+    const [first, second] = player.shots;
+    expect(first!.y).toBeLessThan(second!.y);
+    player.update(TICK_SECONDS, FIRE);
+    expect(player.shots).toEqual([first, second]);
+  });
+
+  it('with doubleShot fires again on the tick the oldest shot leaves the screen', () => {
+    const player = doublePlayer();
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    const [first, second] = player.shots;
+    first!.y = LAST_ON_SCREEN_Y;
+    player.update(TICK_SECONDS, FIRE);
+    expect(player.shots).toHaveLength(2);
+    expect(player.shots[0]).toBe(second);
+    expect(player.shots[1]).not.toBe(first);
+    expect({ x: player.shots[1]!.x, y: player.shots[1]!.y }).toEqual(muzzleOf(player.ship));
+  });
+
+  it('fastShot speeds up the next shots, not the one in flight', () => {
+    const player = new Player();
+    player.update(TICK_SECONDS, FIRE);
+    const old = requireShot(player);
+    expect(player.grantPowerUp('fastShot')).toBe(true);
+    const y0 = old.y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(old.y).toBe(y0 - SHOT_STEP);
+    player.removeShot(old);
+    player.update(TICK_SECONDS, FIRE);
+    const fast = requireShot(player);
+    expect(fast.speed).toBe(FAST_SHOT_SPEED);
+    const y1 = fast.y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(fast.y).toBe(y1 - FAST_STEP);
+  });
+
+  it('a repeated grant is a no-op and keeps the same snapshot', () => {
+    const player = new Player();
+    player.grantPowerUp('fastShot');
+    const snapshot = player.powerUps;
+    expect(player.grantPowerUp('fastShot')).toBe(false);
+    expect(player.powerUps).toBe(snapshot);
+  });
+
+  it('a grant replaces the snapshot instead of mutating it', () => {
+    const player = new Player();
+    const before = player.powerUps;
+    player.grantPowerUp('fastShot');
+    expect(before.fastShot).toBe(false);
+    expect(player.powerUps).not.toBe(before);
+    expect(player.powerUps.fastShot).toBe(true);
+  });
+
+  it('can be granted while down', () => {
+    const player = downPlayer();
+    expect(player.grantPowerUp('doubleShot')).toBe(true);
+    expect(player.powerUps.doubleShot).toBe(true);
+  });
+
+  it('hit() keeps the power-ups', () => {
+    const player = new Player();
+    player.grantPowerUp('fastShot');
+    player.grantPowerUp('doubleShot');
+    const snapshot = player.powerUps;
+    player.hit();
+    run(player, DOWN_TICKS);
+    expect(player.state).toBe('invulnerable');
+    expect(player.powerUps).toBe(snapshot);
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    expect(player.shots).toHaveLength(2);
+    for (const shot of player.shots) expect(shot.speed).toBe(FAST_SHOT_SPEED);
+  });
+
+  it('removeShot(shot) removes exactly that shot; an unknown shot changes nothing', () => {
+    const player = doublePlayer();
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    const [first, second] = player.shots;
+    player.removeShot(first!);
+    expect(player.shots).toEqual([second]);
+    const shots = player.shots;
+    player.removeShot(new Shot(0, 0));
+    expect(player.shots).toEqual(shots);
+  });
+
+  it('replaces the shots array instead of mutating it', () => {
+    const player = doublePlayer();
+    player.update(TICK_SECONDS, FIRE);
+    const beforeFire = player.shots;
+    player.update(TICK_SECONDS, FIRE);
+    expect(beforeFire).toHaveLength(1);
+    expect(player.shots).toHaveLength(2);
+
+    const before = player.shots;
+    player.removeShot(before[0]!);
+    expect(before).toHaveLength(2);
+    expect(player.shots).not.toBe(before);
+    expect(player.shots).toHaveLength(1);
+
+    const beforeOffscreen = player.shots;
+    beforeOffscreen[0]!.y = LAST_ON_SCREEN_Y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(beforeOffscreen).toHaveLength(1);
+    expect(player.shots).toHaveLength(0);
+  });
+
+  it('while down all shots in flight keep flying and no new ones launch', () => {
+    const player = doublePlayer();
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    const [first, second] = player.shots;
+    const y1 = first!.y;
+    const y2 = second!.y;
+    player.hit();
+    player.update(TICK_SECONDS, FIRE);
+    expect(player.shots).toEqual([first, second]);
+    expect(first!.y).toBe(y1 - SHOT_STEP);
+    expect(second!.y).toBe(y2 - SHOT_STEP);
   });
 });
 
@@ -225,7 +380,7 @@ describe('Player ship state', () => {
     const player = downPlayer();
     player.update(TICK_SECONDS, RIGHT_FIRE);
     expect(player.ship.x).toBe(40);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('keeps the shot on hit() and lets it fly while down until it leaves the screen', () => {
@@ -233,13 +388,13 @@ describe('Player ship state', () => {
     player.update(TICK_SECONDS, FIRE);
     const shot = requireShot(player);
     player.hit();
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
     const y0 = shot.y;
     player.update(TICK_SECONDS, IDLE);
     expect(shot.y).toBe(y0 - SHOT_STEP);
     shot.y = LAST_ON_SCREEN_Y;
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('stays down for DOWN_TICKS - 1 updates', () => {
@@ -277,7 +432,7 @@ describe('Player ship state', () => {
     expect(player.ship.x).toBe(SHIP_START_X + STEP);
     player.update(TICK_SECONDS, FIRE);
     expect(player.state).toBe('invulnerable');
-    expect(player.shot).not.toBeNull();
+    expect(onlyShot(player)).not.toBeNull();
   });
 
   it('becomes active INVULNERABLE_TICKS after the respawn', () => {
@@ -423,7 +578,7 @@ describe('Player lives', () => {
     expect(player.canBeHit).toBe(false);
     expect(player.canBeTargeted).toBe(false);
     expect(player.ship.x).toBe(40);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
     expect(player.stateTicks).toBe(DOWN_TICKS + 1000);
     expect(player.lives).toBe(0);
   });
@@ -434,12 +589,12 @@ describe('Player lives', () => {
     const shot = requireShot(player);
     player.hit();
     expect(player.isLost).toBe(true);
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
     const y0 = shot.y;
     player.update(TICK_SECONDS, IDLE);
     expect(shot.y).toBe(y0 - SHOT_STEP);
     shot.y = LAST_ON_SCREEN_Y;
     player.update(TICK_SECONDS, IDLE);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 });

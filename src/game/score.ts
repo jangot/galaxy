@@ -20,14 +20,32 @@ export const ENEMY_POINTS: Readonly<Record<EnemyKind, KindPoints>> = {
  * no float trap like 30 * 1.4 = 41.999...
  * Throws RangeError on a level that is not an integer >= 1.
  */
-export function killPoints(kill: Kill, level: number): number {
+export function levelPoints(base: number, level: number): number {
   if (!Number.isInteger(level) || level < 1) {
     throw new RangeError(`Level must be an integer >= 1, got ${level}`);
   }
-  const points = ENEMY_POINTS[kill.kind];
-  const base = kill.inFlight ? points.flying : points.formation;
   return Math.floor((base * (9 + level) + 50) / 100) * 10;
 }
+
+/** Points for one kill: ENEMY_POINTS of the kind (formation / in flight) through levelPoints. */
+export function killPoints(kill: Kill, level: number): number {
+  const points = ENEMY_POINTS[kill.kind];
+  return levelPoints(kill.inFlight ? points.flying : points.formation, level);
+}
+
+/** Base points for breaking an asteroid (owner decision В7 of feature 006). */
+export const ASTEROID_POINTS = 100;
+
+/** Asteroid points with the same level bonus as enemies: 100 on level 1, 140 on level 5. */
+export function asteroidPoints(level: number): number {
+  return levelPoints(ASTEROID_POINTS, level);
+}
+
+/**
+ * Instead of a useless bonus (L at MAX_LIVES, a power-up already on): flat, no level bonus
+ * (feature 006, В8). Goes through Battle.addScore, so extra-life thresholds apply.
+ */
+export const BONUS_FALLBACK_POINTS = 500;
 
 /** First extra-life threshold, points (owner decision В4). */
 export const EXTRA_LIFE_FIRST = 5000;

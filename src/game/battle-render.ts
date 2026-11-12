@@ -1,5 +1,7 @@
 import { SHIP_SPRITE, SHOT_COLOR } from './art';
+import type { Asteroid } from './asteroid';
 import type { Battle } from './battle';
+import { ASTEROID_SPRITE, CAPSULE_SPRITES } from './bonus-art';
 import type { Enemy } from './enemy';
 import { ENEMY_KINDS, EXPLOSION_FRAME_TICKS, EXPLOSION_TICKS } from './enemy';
 import { ENEMY_SHOT_COLOR, EXPLOSION_FRAMES } from './enemy-art';
@@ -13,13 +15,22 @@ import { drawSprite } from './sprite';
 export const BLINK_TICKS = 4;
 
 /**
- * Draws the battle entities, back to front: enemy shots, player shot, enemies, ship.
+ * Draws the battle entities, back to front: the asteroid, the capsule (over the asteroid's
+ * explosion: it drops out of the debris), enemy shots, player shots (in shots order),
+ * enemies, ship. The asteroid and the capsule are the back layer: every shot, enemy and the
+ * ship are drawn over them (they are harmless and pass behind them).
  * No background.
  * Dead enemies are skipped, exploding ones show an explosion frame.
  * The ship: active - sprite; down - explosion, then nothing; invulnerable - blinking sprite.
- * The player's shot is drawn in any ship state.
+ * The player's shots are drawn in any ship state.
  */
 export function drawBattle(ctx: CanvasRenderingContext2D, battle: Battle): void {
+  const asteroid = battle.bonuses?.asteroid;
+  if (asteroid) drawAsteroid(ctx, asteroid);
+  const capsule = battle.bonuses?.capsule;
+  if (capsule) {
+    drawSprite(ctx, CAPSULE_SPRITES[capsule.kind], Math.floor(capsule.x), Math.floor(capsule.y));
+  }
   for (const enemyShot of battle.wave.shots) {
     ctx.fillStyle = ENEMY_SHOT_COLOR;
     ctx.fillRect(
@@ -29,13 +40,23 @@ export function drawBattle(ctx: CanvasRenderingContext2D, battle: Battle): void 
       ENEMY_SHOT_HEIGHT,
     );
   }
-  const { shot } = battle.player;
-  if (shot) {
+  for (const shot of battle.player.shots) {
     ctx.fillStyle = SHOT_COLOR;
     ctx.fillRect(Math.floor(shot.x), Math.floor(shot.y), SHOT_WIDTH, SHOT_HEIGHT);
   }
   for (const enemy of battle.wave.enemies) drawEnemy(ctx, enemy);
   drawShip(ctx, battle.player);
+}
+
+/** flying: sprite; exploding: the frame for stateTicks, centered in it; gone: nothing. */
+function drawAsteroid(ctx: CanvasRenderingContext2D, asteroid: Asteroid): void {
+  const x = Math.floor(asteroid.x);
+  const y = Math.floor(asteroid.y);
+  if (asteroid.state === 'flying') {
+    drawSprite(ctx, ASTEROID_SPRITE, x, y);
+  } else if (asteroid.state === 'exploding') {
+    drawExplosion(ctx, asteroid.stateTicks, x, y, asteroid.width, asteroid.height);
+  }
 }
 
 /** active: sprite; down: explosion for EXPLOSION_TICKS, then nothing; invulnerable: blinking sprite. */

@@ -31,16 +31,43 @@ export interface LoopCallbacks {
   render(): void;
 }
 
+export interface LoopOptions {
+  /** Start paused: frames render, no ticks until resume(). */
+  readonly paused?: boolean;
+}
+
 /** requestAnimationFrame-driven loop with fixed-step updates. */
 export class GameLoop {
   private accumulator = 0;
   private lastTime: number | null = null;
   private rafId: number | null = null;
+  private isPaused: boolean;
 
   constructor(
     private readonly tickSeconds: number,
     private readonly callbacks: LoopCallbacks,
-  ) {}
+    opts: LoopOptions = {},
+  ) {
+    this.isPaused = opts.paused ?? false;
+  }
+
+  /** Paused: frames keep rendering, the simulation does not advance by itself. */
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  pause(): void {
+    this.isPaused = true;
+    this.accumulator = 0;
+  }
+
+  /** Time spent paused is dropped: the first frame after resume() runs no ticks. */
+  resume(): void {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    this.accumulator = 0;
+    this.lastTime = null;
+  }
 
   start(): void {
     if (this.rafId !== null) return;
@@ -54,6 +81,12 @@ export class GameLoop {
   }
 
   private readonly frame = (time: number): void => {
+    if (this.isPaused) {
+      this.lastTime = time;
+      this.callbacks.render();
+      this.rafId = requestAnimationFrame(this.frame);
+      return;
+    }
     const frameSeconds = this.lastTime === null ? 0 : (time - this.lastTime) / 1000;
     this.lastTime = time;
     const { steps, accumulator } = accumulate(this.accumulator, frameSeconds, this.tickSeconds);

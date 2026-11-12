@@ -2,8 +2,12 @@ import { SCREEN_HEIGHT, SCREEN_WIDTH } from '../../config';
 import type { Input } from '../../engine/input';
 import type { Rng } from '../../engine/rng';
 import type { Scene } from '../../engine/scene';
+import type { BattleOptions } from '../battle';
 import { Starfield } from '../starfield';
 import { PlayScene } from './play-scene';
+
+/** How a new game starts: level and lives (dev builds pass ?level / ?lives). */
+export type GameStart = Pick<BattleOptions, 'startLevel' | 'lives'>;
 
 /** Placeholder title screen: starfield + caption. Real menu comes in a separate task. */
 export class TitleScene implements Scene {
@@ -13,8 +17,8 @@ export class TitleScene implements Scene {
 
   constructor(
     private readonly rng: Rng,
-    /** Level the game starts from; undefined = 1. Dev builds pass ?level=N. */
-    private readonly startLevel?: number,
+    /** undefined fields = level 1, START_LIVES. Kept across a restart after game over. */
+    private readonly start: GameStart = {},
     /** Continue the stars when coming back from a game; undefined = new ones from rng. */
     starfield?: Starfield,
   ) {
@@ -26,8 +30,8 @@ export class TitleScene implements Scene {
     this.starfield.update(dt);
     if (input.pressed('start')) {
       // The factory lives here, so play-scene never imports title-scene (no module cycle).
-      const exit = (): Scene => new TitleScene(this.rng, this.startLevel, this.starfield);
-      return new PlayScene(this.rng, this.starfield, { startLevel: this.startLevel }, exit);
+      const exit = (): Scene => new TitleScene(this.rng, this.start, this.starfield);
+      return new PlayScene(this.rng, this.starfield, { ...this.start }, exit);
     }
   }
 

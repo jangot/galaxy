@@ -1,7 +1,10 @@
 import type { Input } from '../engine/input';
+import type { PowerUpKind, PowerUps } from './bonus';
+import { NO_POWER_UPS } from './bonus';
 import type { MoveDir } from './ship';
 import { SHIP_START_X, Ship } from './ship';
 import type { Shot } from './shot';
+import { FAST_SHOT_SPEED, SHOT_SPEED } from './shot';
 
 /**
  * Ship states: active -hit()-> down -DOWN_TICKS, lives > 0-> invulnerable -INVULNERABLE_TICKS->
@@ -32,21 +35,24 @@ export function readIntent(input: Input): PlayerIntent {
 }
 
 /**
- * Player aggregate: the ship, its state and its single shot.
- * Shot state: Ready (no shot) --fire--> InFlight --offscreen--> Ready, InFlight --hit--> Ready.
- * Fire while a shot is in flight is ignored, not buffered.
+ * Player aggregate: the ship, its state, its shots and power-ups.
+ * Shots: a list of 0..maxShots shots in flight, oldest first. Fire launches a shot when fewer
+ * than maxShots are in flight; otherwise it is ignored, not buffered. A shot leaves the list
+ * when it goes offscreen or hits something (removeShot).
+ * Power-ups (grantPowerUp) stay until the game ends: hit() keeps them.
  * Ship state: active --hit()--> down [lives - 1] --DOWN_TICKS, lives > 0--> invulnerable
  * --INVULNERABLE_TICKS--> active.
  * down with 0 lives (isLost): stays down until addLife() brings a life back; otherwise for
  * good, the battle ends the game.
- * down: intent is ignored, no hits, no target, only the shot in flight keeps flying.
+ * down: intent is ignored, no hits, no target, only the shots in flight keep flying.
  * invulnerable: respawned at SHIP_START_X, controllable and targetable, but cannot be hit.
  * Tick rule (as in Enemy): entering a state sets stateTicks = 0; each update counts the tick,
  * applies the timer transition, then acts in the (new) state.
  */
 export class Player {
   readonly ship: Ship;
-  private activeShot: Shot | null = null;
+  private activeShots: readonly Shot[] = [];
+  private currentPowerUps: PowerUps = NO_POWER_UPS;
   private currentState: ShipState = 'active';
   private ticksInState = 0;
   private livesLeft: number;
@@ -63,9 +69,23 @@ export class Player {
     this.livesLeft = lives;
   }
 
-  /** The shot in flight, or null when the player is ready to fire. */
-  get shot(): Shot | null {
-    return this.activeShot;
+  /**
+   * Shots in flight, oldest first; length <= maxShots. The array is never mutated: every
+   * change (fire, offscreen, removeShot) replaces it, so a loop over a previously read
+   * `shots` stays valid while shots are removed inside it.
+   */
+  get shots(): readonly Shot[] {
+    return this.activeShots;
+  }
+
+  /** How many shots may be in flight at once: 1, or 2 with doubleShot. */
+  get maxShots(): number {
+    return this.currentPowerUps.doubleShot ? 2 : 1;
+  }
+
+  /** Enabled power-ups; a new object on every change, never mutated. */
+  get powerUps(): PowerUps {
+    return this.currentPowerUps;
   }
 
   get state(): ShipState {
@@ -97,14 +117,28 @@ export class Player {
     return this.currentState !== 'down';
   }
 
-  /** Drops the shot in flight (it hit something). Fire is available from the next update. */
-  removeShot(): void {
-    this.activeShot = null;
+  /**
+   * Turns a power-up on in any ship state (down included); it stays until the game ends.
+   * Returns true if it was off, false if it was already on (no-op).
+   */
+  grantPowerUp(kind: PowerUpKind): boolean {
+    if (this.currentPowerUps[kind]) return false;
+    this.currentPowerUps = { ...this.currentPowerUps, [kind]: true };
+    return true;
+  }
+
+  /**
+   * Drops this shot (it hit something); unknown shots are ignored. Replaces the array.
+   * The freed slot is used from the next update (collisions run after Player.update).
+   */
+  removeShot(shot: Shot): void {
+    this.activeShots = this.activeShots.filter((s) => s !== shot);
   }
 
   /**
    * active -> down and lives - 1; ignored in any other state (no loss, does not restart the
-   * timer, so a ram during invulnerable cannot extend it). The shot in flight is kept.
+   * timer, so a ram during invulnerable cannot extend it). The shots in flight and the
+   * power-ups are kept.
    */
   hit(): void {
     if (this.currentState !== 'active') return;
@@ -124,9 +158,10 @@ export class Player {
 
   /**
    * Tick rule: count the tick, apply the timer transition, then act in the (new) state.
-   * down: only the shot flies (intent ignored). active/invulnerable: move -> fly and drop
-   * the shot -> fire. A shot that leaves the screen this tick frees the slot at once,
-   * and a new shot launches from the ship's updated position without moving this tick.
+   * down: only the shots fly (intent ignored). active/invulnerable: move -> fly and drop
+   * offscreen shots -> fire (speed by fastShot, limit maxShots). A slot freed by a shot
+   * leaving the screen this tick is free at once, and a new shot launches from the ship's
+   * updated position without moving this tick.
    * On the respawn tick the ship is put at SHIP_START_X and this tick's intent already applies.
    */
   update(dt: number, intent: PlayerIntent): void {
@@ -139,12 +174,13 @@ export class Player {
     }
     const controllable = this.currentState !== 'down';
     if (controllable) this.ship.update(dt, intent.move);
-    if (this.activeShot) {
-      this.activeShot.update(dt);
-      if (this.activeShot.isOffscreen) this.activeShot = null;
+    for (const shot of this.activeShots) shot.update(dt);
+    if (this.activeShots.some((s) => s.isOffscreen)) {
+      this.activeShots = this.activeShots.filter((s) => !s.isOffscreen);
     }
-    if (controllable && intent.fire && !this.activeShot) {
-      this.activeShot = this.ship.spawnShot();
+    if (controllable && intent.fire && this.activeShots.length < this.maxShots) {
+      const speed = this.currentPowerUps.fastShot ? FAST_SHOT_SPEED : SHOT_SPEED;
+      this.activeShots = [...this.activeShots, this.ship.spawnShot(speed)];
     }
   }
 

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
-import { overlaps, resolveCollisions } from './collisions';
+import { BonusField } from './bonus-field';
+import { CAPSULE_SIZE } from './capsule';
+import { overlaps, resolveBonusCollisions, resolveCollisions } from './collisions';
 import type { Enemy, EnemyEnv } from './enemy';
 import { EXPLOSION_TICKS, PEEL_SEGMENTS } from './enemy';
-import { DOWN_TICKS, Player } from './player';
+import { DOWN_TICKS, Player, START_LIVES } from './player';
+import { SHIP_Y } from './ship';
 import type { Shot } from './shot';
 import { diveOrder, passiveLevel } from './test-levels';
 import { Wave } from './wave';
+import { onlyShot } from './test-shots';
 
 const FIRE = { move: 0, fire: true } as const;
 const IDLE = { move: 0, fire: false } as const;
@@ -21,7 +25,7 @@ function rect(x: number, y: number, width: number, height: number) {
 function playerWithShot(y: number): { player: Player; shot: Shot } {
   const player = new Player();
   player.update(TICK_SECONDS, FIRE);
-  const shot = player.shot;
+  const shot = onlyShot(player);
   if (!shot) throw new Error('expected a shot');
   shot.y = y;
   return { player, shot };
@@ -61,7 +65,7 @@ describe('resolveCollisions', () => {
     const { player, shot } = playerWithShot(100);
     const w = wave(['D']);
     resolveCollisions(player, w);
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
     expect(w.enemies[0]!.state).toBe('formation');
   });
 
@@ -73,7 +77,7 @@ describe('resolveCollisions', () => {
     const { player } = playerWithShot(38);
     resolveCollisions(player, w);
     expect(w.enemies[0]!.state).toBe('exploding');
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('does not hit on touching edges', () => {
@@ -81,7 +85,7 @@ describe('resolveCollisions', () => {
     const { player, shot } = playerWithShot(42);
     resolveCollisions(player, w);
     expect(w.enemies[0]!.state).toBe('formation');
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
   });
 
   it('kills the lowest enemy, by y + height, not by index', () => {
@@ -99,7 +103,7 @@ describe('resolveCollisions', () => {
       resolveCollisions(player, w);
       expect(w.enemies[killed]!.state).toBe('exploding');
       expect(w.enemies[1 - killed]!.state).toBe('formation');
-      expect(player.shot).toBeNull();
+      expect(onlyShot(player)).toBeNull();
     }
   });
 
@@ -133,7 +137,7 @@ describe('resolveCollisions', () => {
     enemy.update(TICK_SECONDS, ENV);
     const { player, shot } = playerWithShot(38);
     resolveCollisions(player, w);
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
     expect(enemy.state).toBe('exploding');
     expect(enemy.stateTicks).toBe(1);
   });
@@ -150,7 +154,7 @@ describe('resolveCollisions', () => {
     resolveCollisions(player, w);
     expect(upper.state).toBe('exploding');
     expect(lower.stateTicks).toBe(0);
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('kills a diving enemy', () => {
@@ -163,7 +167,7 @@ describe('resolveCollisions', () => {
     resolveCollisions(player, w);
     expect(enemy.state).toBe('exploding');
     expect(enemy.sortieId).toBeNull();
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('kills a returning enemy', () => {
@@ -180,7 +184,7 @@ describe('resolveCollisions', () => {
     resolveCollisions(player, w);
     expect(enemy.state).toBe('exploding');
     expect(enemy.sortieId).toBeNull();
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
   });
 });
 
@@ -353,7 +357,7 @@ describe('resolveCollisions ram', () => {
     const kills = resolveCollisions(player, w);
     expect(kills).toEqual([{ kind: 'drone', inFlight: true }]);
     expect(enemy.state).toBe('exploding');
-    expect(player.shot).toBeNull();
+    expect(onlyShot(player)).toBeNull();
     expect(player.state).toBe('active');
   });
 
@@ -488,7 +492,253 @@ describe('resolveCollisions enemy shots', () => {
     const { player, shot } = playerWithShot(100); // column 127, same Y
     resolveCollisions(player, w);
     expect(w.shots).toEqual([enemyShot]);
-    expect(player.shot).toBe(shot);
+    expect(onlyShot(player)).toBe(shot);
     expect(player.state).toBe('active');
+  });
+});
+
+/**
+ * doubleShot player with two shots at height y: the older one in column 127 (ship x = 120),
+ * the younger one in column 67 (ship moved to x = 60).
+ */
+function playerWithTwoShots(y: number): { player: Player; older: Shot; younger: Shot } {
+  const player = new Player();
+  player.grantPowerUp('doubleShot');
+  player.update(TICK_SECONDS, FIRE);
+  player.ship.x = 60;
+  player.update(TICK_SECONDS, FIRE);
+  const [older, younger] = player.shots;
+  if (!older || !younger) throw new Error('expected two shots');
+  older.y = y;
+  younger.y = y;
+  return { player, older, younger };
+}
+
+describe('resolveCollisions with two player shots', () => {
+  it('both shots hit two targets in one tick, kills in shots order', () => {
+    // Enemy 1 is under the older shot, enemy 0 under the younger one.
+    const w = wave(['SD']);
+    const [striker, drone] = [w.enemies[0]!, w.enemies[1]!];
+    striker.x = 62;
+    striker.y = 100;
+    drone.x = 122;
+    drone.y = 100;
+    const { player, older, younger } = playerWithTwoShots(104);
+    expect(older.x).toBe(127);
+    expect(younger.x).toBe(67);
+    const kills = resolveCollisions(player, w);
+    expect(kills).toEqual([
+      { kind: 'drone', inFlight: false },
+      { kind: 'striker', inFlight: false },
+    ]);
+    expect(striker.state).toBe('exploding');
+    expect(drone.state).toBe('exploding');
+    expect(player.shots).toEqual([]);
+  });
+
+  it('two shots over one enemy: the older one kills it, the younger one flies on', () => {
+    const w = wave(['D']);
+    const enemy = w.enemies[0]!;
+    enemy.x = 122;
+    enemy.y = 98;
+    const player = new Player();
+    player.grantPowerUp('doubleShot');
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    const [older, younger] = player.shots;
+    older!.y = 100;
+    younger!.y = 102;
+    const kills = resolveCollisions(player, w);
+    expect(kills).toEqual([{ kind: 'drone', inFlight: false }]);
+    expect(enemy.state).toBe('exploding');
+    expect(player.shots).toEqual([younger]);
+  });
+
+  it('reports up to three kills in one tick: two shots, then a ram', () => {
+    const w = wave(['DDS']);
+    const [a, b] = [w.enemies[0]!, w.enemies[1]!];
+    a.x = 122;
+    a.y = 100;
+    b.x = 62;
+    b.y = 100;
+    const { player } = playerWithTwoShots(104);
+    // The ship is at x = 60 now: the striker dives onto it.
+    divingAt(w, 2, player.ship.x + 2, 205);
+    const kills = resolveCollisions(player, w);
+    expect(kills).toEqual([
+      { kind: 'drone', inFlight: false },
+      { kind: 'drone', inFlight: false },
+      { kind: 'striker', inFlight: true },
+    ]);
+    expect(player.shots).toEqual([]);
+    expect(player.state).toBe('down');
+  });
+});
+
+/** A field whose asteroid has just spawned (window 1...1, rng 0), moved to (x, y). */
+function fieldWithAsteroid(x: number, y: number): BonusField {
+  const field = new BonusField(() => 0, { minTicks: 1, maxTicks: 1 });
+  field.startLevel();
+  field.update(TICK_SECONDS, true);
+  const asteroid = field.asteroid!;
+  asteroid.x = x;
+  asteroid.y = y;
+  return field;
+}
+
+/** A field with a capsule over the default ship (x = 120 … 134, y = 208 … 223). */
+function fieldWithCapsuleAt(y: number): BonusField {
+  const field = fieldWithAsteroid(122, 100);
+  field.hitAsteroid(); // capsule at x = 124, y = 102
+  field.capsule!.y = y;
+  return field;
+}
+
+describe('resolveBonusCollisions', () => {
+  // The shot flies in column 127: an asteroid at x = 122 (122 … 133) covers it, at 128 not.
+  it('a shot over the flying asteroid breaks it and is removed', () => {
+    const field = fieldWithAsteroid(122, 100);
+    const { player } = playerWithShot(104);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: true,
+      collected: null,
+    });
+    expect(player.shots).toEqual([]);
+    expect(field.asteroid!.state).toBe('exploding');
+  });
+
+  it('a miss keeps the shot and the asteroid', () => {
+    const field = fieldWithAsteroid(128, 100);
+    const { player, shot } = playerWithShot(104);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: false,
+      collected: null,
+    });
+    expect(onlyShot(player)).toBe(shot);
+    expect(field.asteroid!.state).toBe('flying');
+  });
+
+  it('does nothing without an asteroid', () => {
+    const field = new BonusField(() => 0);
+    field.startLevel();
+    const { player, shot } = playerWithShot(104);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: false,
+      collected: null,
+    });
+    expect(onlyShot(player)).toBe(shot);
+  });
+
+  it('an exploding asteroid lets the shot fly on', () => {
+    const field = fieldWithAsteroid(122, 100);
+    field.asteroid!.hit();
+    const { player, shot } = playerWithShot(104);
+    expect(resolveBonusCollisions(player, field).asteroidBroken).toBe(false);
+    expect(onlyShot(player)).toBe(shot);
+  });
+
+  it('two shots over it: the older one breaks it, the younger one flies on', () => {
+    const field = fieldWithAsteroid(122, 98);
+    const player = new Player();
+    player.grantPowerUp('doubleShot');
+    player.update(TICK_SECONDS, FIRE);
+    player.update(TICK_SECONDS, FIRE);
+    const [older, younger] = player.shots;
+    older!.y = 100;
+    younger!.y = 102;
+    expect(resolveBonusCollisions(player, field).asteroidBroken).toBe(true);
+    expect(player.shots).toEqual([younger]);
+  });
+
+  it('an enemy goes first: a shot that killed it cannot hit the asteroid', () => {
+    const w = wave(['D']);
+    const enemy = w.enemies[0]!;
+    enemy.x = 122;
+    enemy.y = 98;
+    const field = fieldWithAsteroid(122, 98);
+    const { player } = playerWithShot(100);
+    expect(resolveCollisions(player, w)).toEqual([{ kind: 'drone', inFlight: false }]);
+    expect(resolveBonusCollisions(player, field).asteroidBroken).toBe(false);
+    expect(field.asteroid!.state).toBe('flying');
+  });
+
+  it('the ship never interacts with the asteroid', () => {
+    const player = new Player();
+    const field = fieldWithAsteroid(player.ship.x, SHIP_Y);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: false,
+      collected: null,
+    });
+    expect(player.state).toBe('active');
+    expect(player.lives).toBe(START_LIVES);
+    expect(field.asteroid!.state).toBe('flying');
+  });
+
+  // The bonus rng () => 0 gives every capsule here the kind 'life'.
+  it('the active ship catches a capsule over it', () => {
+    const player = new Player();
+    const field = fieldWithCapsuleAt(SHIP_Y);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: false,
+      collected: 'life',
+    });
+    expect(field.capsule).toBeNull();
+  });
+
+  it('the invulnerable ship catches it too', () => {
+    const player = new Player();
+    player.hit();
+    for (let i = 0; i < DOWN_TICKS; i++) player.update(TICK_SECONDS, IDLE);
+    expect(player.state).toBe('invulnerable');
+    const field = fieldWithCapsuleAt(SHIP_Y);
+    expect(resolveBonusCollisions(player, field).collected).toBe('life');
+    expect(field.capsule).toBeNull();
+  });
+
+  it('the ship that is down does not catch it', () => {
+    const player = new Player();
+    player.hit();
+    expect(player.state).toBe('down');
+    const field = fieldWithCapsuleAt(SHIP_Y);
+    const capsule = field.capsule;
+    expect(resolveBonusCollisions(player, field).collected).toBeNull();
+    expect(field.capsule).toBe(capsule);
+  });
+
+  it('touching edges do not catch; a 1 px overlap does', () => {
+    const player = new Player();
+    const touching = fieldWithCapsuleAt(SHIP_Y - CAPSULE_SIZE);
+    const capsule = touching.capsule;
+    expect(resolveBonusCollisions(player, touching).collected).toBeNull();
+    expect(touching.capsule).toBe(capsule);
+
+    const overlapping = fieldWithCapsuleAt(SHIP_Y - CAPSULE_SIZE + 1);
+    expect(resolveBonusCollisions(player, overlapping).collected).toBe('life');
+    expect(overlapping.capsule).toBeNull();
+  });
+
+  it('an asteroid broken at the ship height gives its capsule in the same call', () => {
+    const field = fieldWithAsteroid(122, 200);
+    const { player } = playerWithShot(204);
+    // The capsule drops at y = 202: 202 + 8 > SHIP_Y = 208.
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: true,
+      collected: 'life',
+    });
+    expect(field.capsule).toBeNull();
+    expect(player.shots).toEqual([]);
+  });
+
+  it('a player shot passes through the capsule', () => {
+    const field = fieldWithCapsuleAt(100); // x = 124 … 131 covers the shot column 127
+    const capsule = field.capsule;
+    expect(field.asteroid!.state).toBe('exploding');
+    const { player, shot } = playerWithShot(102);
+    expect(resolveBonusCollisions(player, field)).toEqual({
+      asteroidBroken: false,
+      collected: null,
+    });
+    expect(onlyShot(player)).toBe(shot);
+    expect(field.capsule).toBe(capsule);
   });
 });
