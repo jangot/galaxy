@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
-import { SHIP_SPRITE, SHOT_COLOR } from './art';
-import { Battle } from './battle';
+import { SHIELD_COLORS, SHIELD_OFFSET_Y, SHIELD_SPRITES, SHIP_SPRITE, SHOT_COLOR } from './art';
+import type { BattleOptions } from './battle';
+import { Battle, GAME_OVER_DELAY_TICKS } from './battle';
 import { ASTEROID_SPRITE, CAPSULE_SPRITES } from './bonus-art';
 import { ASTEROID_SPAWN_MIN_TICKS } from './bonus-field';
 import { BLINK_TICKS, drawBattle } from './battle-render';
@@ -13,7 +14,7 @@ import { ENEMY_KINDS, EXPLOSION_FRAME_TICKS, EXPLOSION_TICKS, PEEL_SEGMENTS } fr
 import { DRONE_SPRITE, ENEMY_SHOT_COLOR, EXPLOSION_FRAMES } from './enemy-art';
 import { ENEMY_SHOT_HEIGHT, ENEMY_SHOT_WIDTH } from './enemy-shot';
 import type { PlayerIntent } from './player';
-import { DOWN_TICKS, INVULNERABLE_TICKS } from './player';
+import { INVULNERABLE_TICKS, MAX_SHIELD, START_SHIELD } from './player';
 import { SHIP_HEIGHT, SHIP_START_X, SHIP_WIDTH, SHIP_Y } from './ship';
 import { SHOT_HEIGHT, SHOT_WIDTH } from './shot';
 import type { Sprite } from './sprite';
@@ -32,8 +33,15 @@ function spriteCalls(sprite: Sprite, x: number, y: number): FillCall[] {
   return calls;
 }
 
-function shipCalls(x: number, y: number): FillCall[] {
-  return spriteCalls(SHIP_SPRITE, x, y);
+/** Expected calls for the shield arc of `shield` above a ship at (x, y); none at 0. */
+function shieldCalls(x: number, y: number, shield: number): FillCall[] {
+  const arc = SHIELD_SPRITES[shield];
+  return arc ? spriteCalls(arc, x, y + SHIELD_OFFSET_Y) : [];
+}
+
+/** Expected calls for the ship at (x, y) and its shield arc (default START_SHIELD), in draw order. */
+function shipCalls(x: number, y: number, shield: number = START_SHIELD): FillCall[] {
+  return [...spriteCalls(SHIP_SPRITE, x, y), ...shieldCalls(x, y, shield)];
 }
 
 /** Expected calls for every enemy of the wave, in wave order. */
@@ -47,8 +55,8 @@ function opaquePixels(sprite: Sprite): number {
   return sprite.pixels.filter((p) => p != null).length;
 }
 
-function newBattle(): Battle {
-  return new Battle(createRng(1), { levels: ONE_CORNER_ENEMY });
+function newBattle(opts: BattleOptions = {}): Battle {
+  return new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, ...opts });
 }
 
 const FIRE: PlayerIntent = { move: 0, fire: true };
@@ -169,7 +177,9 @@ describe('drawBattle', () => {
       (sum, e) => sum + opaquePixels(ENEMY_KINDS[e.kind].sprite),
       0,
     );
-    expect(calls).toHaveLength(enemyPixels + opaquePixels(SHIP_SPRITE));
+    expect(calls).toHaveLength(
+      enemyPixels + opaquePixels(SHIP_SPRITE) + opaquePixels(SHIELD_SPRITES[START_SHIELD]!),
+    );
   });
 });
 
@@ -255,12 +265,12 @@ function draw(battle: Battle): FillCall[] {
 }
 
 describe('drawBattle ship states', () => {
-  it('the ship explosion ends before the respawn', () => {
-    expect(EXPLOSION_TICKS).toBeLessThan(DOWN_TICKS);
+  it('the ship explosion ends before game over', () => {
+    expect(EXPLOSION_TICKS).toBeLessThan(GAME_OVER_DELAY_TICKS);
   });
 
   it('draws explosion frame 0 centered in the ship on the hit tick', () => {
-    const battle = newBattle();
+    const battle = newBattle({ shield: 0 });
     battle.player.hit();
     const frame = EXPLOSION_FRAMES[0]!;
     // An 11x9 frame over the 15x16 ship at (120, 208) lands at (122, 211).
@@ -269,7 +279,7 @@ describe('drawBattle ship states', () => {
   });
 
   it('switches to frame 1 after EXPLOSION_FRAME_TICKS', () => {
-    const battle = newBattle();
+    const battle = newBattle({ shield: 0 });
     battle.player.hit();
     run(battle, EXPLOSION_FRAME_TICKS);
     const frame = EXPLOSION_FRAMES[1]!;
@@ -279,7 +289,7 @@ describe('drawBattle ship states', () => {
   });
 
   it('draws frame 1 on the last explosion tick, then no ship', () => {
-    const battle = newBattle();
+    const battle = newBattle({ shield: 0 });
     battle.player.hit();
     run(battle, EXPLOSION_TICKS - 1);
     expect(draw(battle)).toEqual([
@@ -292,7 +302,7 @@ describe('drawBattle ship states', () => {
   });
 
   it('draws the player shot while the ship is down', () => {
-    const battle = newBattle();
+    const battle = newBattle({ shield: 0 });
     battle.update(TICK_SECONDS, FIRE);
     battle.player.hit();
     battle.update(TICK_SECONDS, IDLE);
@@ -306,18 +316,18 @@ describe('drawBattle ship states', () => {
     ]);
   });
 
-  it('blinks the invulnerable ship at SHIP_START_X: shown, hidden, shown', () => {
+  it('blinks the ship where it was hit: shown, hidden, shown', () => {
     const battle = newBattle();
     battle.player.ship.x = 40;
     battle.player.hit();
-    run(battle, DOWN_TICKS);
     expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(1);
     expect(battle.player.stateTicks).toBe(0);
-    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(SHIP_START_X, SHIP_Y)]);
+    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(40, SHIP_Y, 1)]);
     run(battle, BLINK_TICKS);
     expect(draw(battle)).toEqual(enemyCalls(battle));
     run(battle, BLINK_TICKS);
-    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(SHIP_START_X, SHIP_Y)]);
+    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(40, SHIP_Y, 1)]);
   });
 
   it('draws the ship again once active, where blinking would hide it', () => {
@@ -325,12 +335,71 @@ describe('drawBattle ship states', () => {
     expect(Math.floor((INVULNERABLE_TICKS - 1) / BLINK_TICKS) % 2).toBe(1);
     const battle = newBattle();
     battle.player.hit();
-    run(battle, DOWN_TICKS + INVULNERABLE_TICKS - 1);
+    run(battle, INVULNERABLE_TICKS - 1);
     expect(battle.player.state).toBe('invulnerable');
     expect(draw(battle)).toEqual(enemyCalls(battle));
     run(battle, 1);
     expect(battle.player.state).toBe('active');
-    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(SHIP_START_X, SHIP_Y)]);
+    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(SHIP_START_X, SHIP_Y, 1)]);
+  });
+});
+
+describe('drawBattle shield arc', () => {
+  it('draws the arc after the ship, above it, in the level color, for every level', () => {
+    for (let k = 1; k <= MAX_SHIELD; k++) {
+      const battle = newBattle({ shield: k });
+      const x = battle.player.ship.x;
+      const calls = draw(battle);
+      expect(calls).toEqual([...enemyCalls(battle), ...shipCalls(x, SHIP_Y, k)]);
+      const arc = calls.slice(-opaquePixels(SHIELD_SPRITES[k]!));
+      expect(arc.every((c) => c.fillStyle === SHIELD_COLORS[k])).toBe(true);
+      expect(Math.min(...arc.map((c) => c.y))).toBe(SHIP_Y + SHIELD_OFFSET_Y);
+    }
+  });
+
+  it('draws no arc at shield 0', () => {
+    const battle = newBattle({ shield: 0 });
+    expect(draw(battle)).toEqual([
+      ...enemyCalls(battle),
+      ...spriteCalls(SHIP_SPRITE, battle.player.ship.x, SHIP_Y),
+    ]);
+  });
+
+  it('draws no arc while the ship is down', () => {
+    const battle = newBattle({ shield: 0 });
+    battle.player.hit();
+    expect(battle.player.state).toBe('down');
+    // Exact list: the enemy (drone green = level 5 color) sits above SHIP_Y, so no color filter.
+    expect(draw(battle)).toEqual([
+      ...enemyCalls(battle),
+      ...shipExplosionCalls(battle, EXPLOSION_FRAMES[0]!),
+    ]);
+  });
+
+  it('hides the arc together with the ship in the hidden blink phase', () => {
+    const battle = newBattle();
+    battle.player.hit();
+    run(battle, BLINK_TICKS);
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(1);
+    expect(draw(battle)).toEqual(enemyCalls(battle));
+  });
+
+  it('recolors the arc on the hit tick', () => {
+    const battle = newBattle({ shield: 3 });
+    battle.player.ship.x = 40;
+    battle.player.hit();
+    expect(battle.player.shield).toBe(2);
+    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(40, SHIP_Y, 2)]);
+  });
+
+  it('a hit at shield 1 leaves the blinking ship without an arc', () => {
+    const battle = newBattle({ shield: 1 });
+    battle.player.ship.x = 40;
+    battle.player.hit();
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(0);
+    expect(draw(battle)).toEqual([...enemyCalls(battle), ...shipCalls(40, SHIP_Y, 0)]);
   });
 });
 
@@ -500,7 +569,7 @@ describe('drawBattle asteroid', () => {
     asteroid.x = 100.5;
     asteroid.y = 50;
     expect(battle.bonuses!.hitAsteroid()).toBe(true);
-    // The stub rng () => 0 gives a 'life' asteroid; the sprite follows capsule.kind.
+    // The stub rng () => 0 gives a 'shield' asteroid; the sprite follows capsule.kind.
     expect(battle.bonuses!.capsule!.kind).toBe(asteroid.bonus);
     expect(draw(battle)).toEqual([
       ...explosionCalls(asteroid, EXPLOSION_FRAMES[0]!),

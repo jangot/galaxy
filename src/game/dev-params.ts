@@ -1,5 +1,5 @@
 import { parseStartLevel } from './levels';
-import { MAX_LIVES } from './player';
+import { MAX_SHIELD } from './player';
 
 /** Dev-only URL parameters (see second-brain/architecture/dev-hooks.md). */
 export interface DevParams {
@@ -9,8 +9,8 @@ export interface DevParams {
   readonly paused: boolean;
   /** ?level=N, parseStartLevel; undefined in production. */
   readonly startLevel: number | undefined;
-  /** ?lives=N: integer 1..MAX_LIVES; undefined = START_LIVES. */
-  readonly lives: number | undefined;
+  /** ?shield=N: integer 0..MAX_SHIELD; undefined = START_SHIELD. */
+  readonly shield: number | undefined;
 }
 
 /** What production uses: no parameters are read. */
@@ -18,7 +18,7 @@ export const NO_DEV_PARAMS: DevParams = {
   seed: null,
   paused: false,
   startLevel: undefined,
-  lives: undefined,
+  shield: undefined,
 };
 
 const MAX_SEED = 2 ** 32 - 1;
@@ -37,6 +37,6 @@ export function parseDevParams(search: string): DevParams {
     seed: parseIntIn(q.get('seed'), 0, MAX_SEED),
     paused: q.get('paused') === '1',
     startLevel: parseStartLevel(q.get('level')),
-    lives: parseIntIn(q.get('lives'), 1, MAX_LIVES) ?? undefined,
+    shield: parseIntIn(q.get('shield'), 0, MAX_SHIELD) ?? undefined,
   };
 }

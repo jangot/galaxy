@@ -39,12 +39,12 @@ function capsuleSprite(letterRows: readonly string[], fill: string, frame: strin
 }
 
 /**
- * Capsules, 8×8: a framed colored plate with the bonus letter (L - life, S - fast shot,
+ * Capsules, 8×8: a framed colored plate with the bonus letter (L - shield level, S - fast shot,
  * D - double shot). Their size is the capsule hitbox (CAPSULE_SIZE) and the HUD icon size
  * (task 028), see bonus-art.test.ts. Colors are a first pass, the owner approves them.
  */
 export const CAPSULE_SPRITES: Readonly<Record<BonusKind, Sprite>> = {
-  life: capsuleSprite(
+  shield: capsuleSprite(
     ['BFLFFFFB', 'BFLFFFFB', 'BFLFFFFB', 'BFLFFFFB', 'BFLLLLFB'],
     '#d8433a', // red plate
     '#7a1a14',

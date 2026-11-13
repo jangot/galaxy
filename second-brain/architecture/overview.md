@@ -27,22 +27,22 @@
 
 - `starfield.ts` — фон из звёзд.
 - `scenes/title-scene.ts` — `TitleScene(rng, start?: GameStart, starfield?)` (`GameStart` =
-  `Pick<BattleOptions, 'startLevel' | 'lives'>`, по умолчанию `{}`), заглушка титульного
+  `Pick<BattleOptions, 'startLevel' | 'shield'>`, по умолчанию `{}`), заглушка титульного
   экрана; переданные звёзды продолжаются (`rng` на них не тратится), без них — новые из `rng`;
   `readonly starfield` (для тестов). По `start` (Enter) возвращает `PlayScene`, передавая свой
-  `rng`, тот же экземпляр `Starfield` — звёзды продолжаются без скачка — `{ startLevel, lives }`
+  `rng`, тот же экземпляр `Starfield` — звёзды продолжаются без скачка — `{ startLevel, shield }`
   и фабрику `exit`, создающую новый `TitleScene` с теми же `rng`, `start`, `starfield`
   (возврат после Game Over). Фабрика живёт в титуле — `play-scene` не импортирует `title-scene`.
 - Точка входа `main.ts`: в dev-сборке (`import.meta.env.DEV`) параметры —
-  `parseDevParams(location.search)` (`seed`, `paused`, `level`, `lives`), в прод-сборке —
-  `NO_DEV_PARAMS`; `createRng(seed ?? Date.now())`, `TitleScene(rng, { startLevel, lives })`.
+  `parseDevParams(location.search)` (`seed`, `paused`, `level`, `shield`), в прод-сборке —
+  `NO_DEV_PARAMS`; `createRng(seed ?? Date.now())`, `TitleScene(rng, { startLevel, shield })`.
   Тело тика — функция `tick()` (`update` → смена сцены → `input.endTick()` → счётчик `ticks`),
   её зовут и `GameLoop` (`{ paused }`), и `__galaxy.step`. В DEV — динамический
   `import('./game/dev-hooks')` и `window.__galaxy = createDevHooks(...)`; в прод-бандл не
   попадает. Подробно для тестировщика — `second-brain/architecture/dev-hooks.md`.
 - `dev-params.ts` — `parseDevParams(search): DevParams` (чистая; `seed` — целое
-  `0 … 2^32 − 1` или `null`, `paused` — ровно `1`, `startLevel` — `parseStartLevel`, `lives` —
-  `1 … MAX_LIVES` или `undefined`), `NO_DEV_PARAMS`.
+  `0 … 2^32 − 1` или `null`, `paused` — ровно `1`, `startLevel` — `parseStartLevel`, `shield` —
+  `0 … MAX_SHIELD` или `undefined`; `?lives` не читается), `NO_DEV_PARAMS`.
 - `dev-snapshot.ts` — `snapshotScene(scene, { tick, paused }): GalaxySnapshot` и
   `snapshotBattle(battle)`: plain-JSON копия по публичным геттерам (`scene`
   `title`/`play`/`over`/`unknown`; бой — игрок, враги без `dead`, выстрелы, бонусное поле).
@@ -55,10 +55,16 @@
   на каждый непрозрачный пиксель; координаты целые (`Math.floor` — в вызывающем коде).
 - `art.ts` — данные пиксель-арта: `SHIP_SPRITE` 15×16 (разбирается при загрузке модуля —
   ошибка формата роняет импорт и ловится тестами), `SHOT_COLOR` (белый; выстрел —
-  прямоугольник, не спрайт), `LIFE_ICON_SPRITE` 7×8 (иконка жизни для HUD — уменьшенный
-  силуэт корабля в палитре корабля; предел 8×8 — `LIFE_ICON_MAX_SIZE` в `hud.ts`,
-  проверяется тестом) и цвета панели `HUD_LABEL_COLOR` (красный, как `R` корабля) /
-  `HUD_VALUE_COLOR` (белый).
+  прямоугольник, не спрайт) и цвета панели `HUD_LABEL_COLOR` (красный, как `R` корабля) /
+  `HUD_VALUE_COLOR` (белый); `SHIELD_GAUGE_EMPTY_COLOR` (тёмно-серый `#3c3c3c`, пустой
+  сегмент шкалы щита в HUD; утверждается на приёмке, отличие от `SHIELD_COLORS` проверяется
+  тестом). Щит над кораблём: `SHIELD_COLORS` (6 цветов, индекс = уровень
+  щита, 0 — `null`: 1 красный, 2 жёлтый, 3 жёлто-зелёный, 4 светло-зелёный, 5 зелёный),
+  `SHIELD_SPRITES` (дуга 15×4 = ширина корабля в цвете уровня, выводится из `SHIELD_COLORS`,
+  индекс 0 — `null`), `SHIELD_OFFSET_Y = -5` (дуга в строках 203…206, строка 207 пустая).
+  **`art.ts` импортирует только `sprite.ts`** (иначе цикл `art → player → ship → art` и TDZ
+  на `SHIP_SPRITE`); связь длины с `MAX_SHIELD` и ширины с `SHIP_WIDTH` проверяет
+  `art.test.ts`.
 - `font.ts` / `font-art.ts` — моноширинный пиксельный шрифт (NES-стиль): глифы 7×7
   в клетке 8×8 (`GLYPH_WIDTH`, `GLYPH_HEIGHT`, `CHAR_ADVANCE`), набор `0–9`, `A–Z`,
   пробел. Данные — строки `#`/`.` в `font-art.ts` (`FONT_GLYPHS`, под `// prettier-ignore`,
@@ -81,8 +87,8 @@
   фиксирован после вылета, `update(dt)` — движение вниз, `isOffscreen` — `y >= SCREEN_HEIGHT`.
   Импортирует `config`.
 - `ship.ts` — `Ship`: позиция — левый верхний угол, старт по центру по X
-  (`SHIP_START_X = 120` — точка старта и возрождения),
-  `SHIP_Y = 208` (полоса под кораблём пустая; жизни — в верхней панели); `SHIP_WIDTH`/`SHIP_HEIGHT`
+  (`SHIP_START_X = 120` — точка старта),
+  `SHIP_Y = 208` (полоса под кораблём пустая; щит — в верхней панели); `SHIP_WIDTH`/`SHIP_HEIGHT`
   выводятся из спрайта. Движение — `update(dt, move)` с `MoveDir` (`-1 | 0 | 1`):
   `SHIP_SPEED = 120` px/с (2 px/тик), без инерции, зажим `[0, SCREEN_WIDTH - SHIP_WIDTH]`;
   шаг за край обрезается ровно до края. `spawnShot(speed = SHOT_SPEED)` — новый `Shot` по
@@ -101,22 +107,20 @@
   `FAST_SHOT_SPEED`. Порядок тика: движение корабля → полёт выстрелов и удаление ушедших →
   огонь (слот ушедшего освобождается в том же тике, новый выстрел вылетает из уже
   сдвинутого корабля и в тике вылета не движется).
-  Жизни: `START_LIVES = 3` (общее число, включая корабль на поле), `MAX_LIVES = 5`;
-  конструктор `Player(ship?, lives?)` — `lives` целое 1…`MAX_LIVES`, иначе `RangeError`;
-  геттеры `lives`, `isLost` (`lives === 0`). `addLife()` — `lives + 1` до `MAX_LIVES` в
-  любом состоянии, состояние и `stateTicks` не трогает; в `down` при 0 жизнях возвращает
-  возрождение в тик `DOWN_TICKS` от попадания.
-  Автомат корабля (`ShipState`): `active` → `hit()` (`lives − 1`) → `down` → `DOWN_TICKS = 60`
-  (1 с), только при `lives > 0` → `invulnerable` → `INVULNERABLE_TICKS = 120` (2 с) →
-  `active`; при `lives === 0` корабль остаётся `down`, пока `addLife()` не вернёт жизнь (`stateTicks` растёт, ввод
-  игнорируется, выстрел в полёте долетает). Геттеры `state`,
-  `stateTicks`, `canBeHit` (только `active`), `canBeTargeted` (всё, кроме `down`).
-  `hit()` действует только из `active` (в `down`/`invulnerable` игнорируется: жизнь не
-  списывает, таймер не сбрасывает) и не снимает выстрелы в полёте. Правило тиков — как у `Enemy`: вход в
-  состояние ставит `stateTicks = 0`; `update` — счёт тика → переход по таймеру →
-  поведение нового состояния. В `down` ввод игнорируется, летит только выстрел; в тике
-  возрождения корабль ставится в `SHIP_START_X`, и intent этого тика уже применяется
-  (движение и огонь); в `invulnerable` корабль управляем.
+  Щит (фича 008): `START_SHIELD = 2`, `MAX_SHIELD = 5`; конструктор `Player(ship?, shield?)` —
+  `shield` целое `0…MAX_SHIELD`, иначе `RangeError`; геттеры `shield`, `isLost`
+  (`state === 'down'`). `addShield(): boolean` — `shield + 1` ниже `MAX_SHIELD` и не в `down`
+  (`true`, если вырос; `false` на максимуме или в `down`), состояние и `stateTicks` не трогает.
+  Автомат корабля (`ShipState`): `active` → `hit()` при `shield > 0` (`shield − 1`) →
+  `invulnerable` (на месте, без переноса) → `INVULNERABLE_TICKS = 120` (2 с) → `active`;
+  `active` → `hit()` при `shield = 0` → `down` — конечное (`stateTicks` растёт, ввод
+  игнорируется, выстрел в полёте долетает); возрождения и переноса в `SHIP_START_X` нет.
+  Геттеры `state`, `stateTicks`, `canBeHit` (только `active`), `canBeTargeted` (всё, кроме
+  `down`). `hit()` действует только из `active` (в `down`/`invulnerable` игнорируется: щит не
+  снимает, таймер не сбрасывает) и не снимает выстрелы в полёте. Правило тиков — как у
+  `Enemy`: вход в состояние ставит `stateTicks = 0`; `update` — счёт тика → переход по
+  таймеру → поведение нового состояния. В `down` ввод игнорируется, летят только выстрелы; в
+  `invulnerable` корабль управляем.
 - `levels.ts` — `EnemyKind` (`drone | striker | raider`), `LayoutChar` (`D`, `S`, `R`, `.`),
   `LevelConfig { layout, swaySpeed, diveSpeed, firstDiveDelayTicks, diveIntervalTicks,
 maxSorties, diverShots, raiderShots }` (`swaySpeed` — px/с, ADR 003; `diveSpeed` — px/с, целые или половинные px/тик ≥ 1, ADR 004;
@@ -253,9 +257,10 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   (`formation` / `flying`); `ASTEROID_POINTS = 100`, `asteroidPoints(level)` —
   `levelPoints(ASTEROID_POINTS, level)` (фича 006, В7: 1-й уровень 100, 5-й 140);
   `BONUS_FALLBACK_POINTS = 500` — вместо бесполезного бонуса, без надбавки (В8).
-  Доп. жизни (В4): `EXTRA_LIFE_FIRST = 5000`, `EXTRA_LIFE_EVERY = 10000`,
-  `extraLivesEarned(before, after)` — число порогов 5000/15000/25000/…, пройденных за
-  начисление (ровно на пороге — считается), без предела по жизням; внутренняя
+  Пороги щита (фича 005 В4, фича 008 В6): `EXTRA_SHIELD_FIRST = 5000`,
+  `EXTRA_SHIELD_EVERY = 10000`, `extraShieldsEarned(before, after)` — число порогов
+  5000/15000/25000/…, пройденных за начисление (ровно на пороге — считается), без предела по
+  щиту; внутренняя
   `thresholdsReached`.
 - `test-levels.ts` — только для тестов: `passiveLevel(layout, overrides?)` — уровень с
   пассивными значениями (`firstDiveDelayTicks = diveIntervalTicks = 1_000_000`, вылетов
@@ -274,7 +279,7 @@ config.raiderShots`. Порядок кандидатов — по рядам с�
   таран»), `EVASION_START`, `runEvasion(diver, step, script)` (скриптовый корабль стоит /
   финтит, таран — `overlaps`); используют `enemy.test.ts` и `steering.test.ts`.
 - `bonus.ts` — без импортов: `PowerUpKind` (`fastShot | doubleShot`), `BonusKind`
-  (`life | PowerUpKind`), `BONUS_KINDS` (фиксированный порядок для выбора через `rng`),
+  (`shield | PowerUpKind`), `BONUS_KINDS` (фиксированный порядок для выбора через `rng`),
   `PowerUps { fastShot, doubleShot }`, `NO_POWER_UPS`.
 - `asteroid.ts` — `Asteroid(dir, offset, bonus)`: `ASTEROID_SIZE = 12` (= спрайт),
   `ASTEROID_FALL_SPEED = 60` (1 px/тик), `ASTEROID_DRIFT_SPEED = 30` (½ px/тик),
@@ -311,21 +316,22 @@ gone`; `hit()` — `true` только из `flying`; `stateTicks` — прав�
   рисованные вручную, не из шрифта; цвета стартовые (утверждаются на приёмке). Без цветов
   выстрелов.
 - `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
-  генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels?, lives?,
-bonuses? }` (уровень по умолчанию 1, таблица — `LEVELS`, жизни — `START_LIVES`, проверяет
+  генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels?, shield?,
+bonuses? }` (уровень по умолчанию 1, таблица — `LEVELS`, щит — `START_SHIELD`, проверяет
   `Player`; тесты внедряют таблицы из `test-levels.ts`). `bonuses?: BonusOptions { rng }` —
   свой генератор поля бонусов: без него поля нет (геттер `bonuses === null`, старые тесты
   без астероидов); с ним в конструкторе `new BonusField(rng)` и `startLevel()`, `rng` боя
   не трогается. `readonly player` (создаётся в конструкторе
-  с `opts.lives`, `rng` не трогает), геттеры `level`, `wave`, `bonuses`, `score` (целое ≥ 0, с 0;
+  с `opts.shield`, `rng` не трогает), геттеры `level`, `wave`, `bonuses`, `score` (целое ≥ 0, с 0;
   очки за убийства в `playing`, `asteroidPoints(level)` за сбитый астероид и
   `BONUS_FALLBACK_POINTS` за бесполезный пойманный бонус в `playing` и `cleared`; порядок
   начислений тика — убийства → астероид → капсула; меняется только в private `addScore`; там же за каждый пройденный порог
-  `player.addLife()` — после `resolveCollisions`, так что гибель этого тика списывается
-  раньше; доп. жизнь в `down` при 0 жизнях отменяет `over`), `phase`
+  `player.addShield()` — после `resolveCollisions`, так что удар этого тика списывается
+  раньше; сверх `MAX_SHIELD` и в `down` прирост пропадает, порог в `down` `over` не
+  отменяет), `phase`
   (`BattlePhase = 'playing' | 'cleared' | 'over'`), `phaseTicks` — общий счётчик всех фаз
   (0 после `update` перехода, +1 за каждый следующий; private `ticksInPhase`). `update(dt, intent)`: игрок → волна (получает
-  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → `bonuses?.update(dt, phase === 'playing')` (двигает астероид всегда; тик уровня и появление — только в `playing`) → коллизии и начисление очков (только `playing`: `addScore(killPoints(kill, level))` за каждое убийство, уровень этого тика) → `resolveBonusCollisions`, `addScore(asteroidPoints(level))` и `applyBonus(collected)` (`playing` и `cleared`, после врагов; в `over` бонусных коллизий нет — астероид и капсула долетают) → фазы. Private `applyBonus(kind)`: `life` — `addLife()` при `lives < MAX_LIVES`, иначе `addScore(BONUS_FALLBACK_POINTS)`; улучшение — `grantPowerUp`, если выключено, иначе `addScore(BONUS_FALLBACK_POINTS)`; полезность — по состоянию на момент применения (после убийств и астероида этого тика). Фазы: счёт тика, затем по порядку — (1) из `playing`/`cleared` в `over`, когда `player.isLost` и `player.stateTicks >= GAME_OVER_DELAY_TICKS` (`= DOWN_TICKS`, 1 с — момент, когда корабль появился бы); проверяется первым, поэтому после потери последнего корабля уровень не меняется; `over` терминальна: коллизий нет, волна обновляется дальше; (2) когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
+  `targetX` = центр корабля `ship.x + floor(SHIP_WIDTH / 2)` при `player.canBeTargeted`, иначе `null` — в `down` `striker` гасит боковой ход за ≤ `STRIKER_TURN_TICKS` тиков и идёт прямо вниз, `drone` перестаёт сворачивать на ближайшем переприцеливании) → `bonuses?.update(dt, phase === 'playing')` (двигает астероид всегда; тик уровня и появление — только в `playing`) → коллизии и начисление очков (только `playing`: `addScore(killPoints(kill, level))` за каждое убийство, уровень этого тика) → `resolveBonusCollisions`, `addScore(asteroidPoints(level))` и `applyBonus(collected)` (`playing` и `cleared`, после врагов; в `over` бонусных коллизий нет — астероид и капсула долетают) → фазы. Private `applyBonus(kind)`: `shield` — `if (!addShield()) addScore(BONUS_FALLBACK_POINTS)` (`false` здесь — только на максимуме: сбитый корабль капсулу не ловит); улучшение — `grantPowerUp`, если выключено, иначе `addScore(BONUS_FALLBACK_POINTS)`; полезность — по состоянию на момент применения (после убийств и астероида этого тика). Фазы: счёт тика, затем по порядку — (1) из `playing`/`cleared` в `over`, когда `player.isLost` и `player.stateTicks >= GAME_OVER_DELAY_TICKS` (`= 60` литералом в `battle.ts`, 1 с от гибели — удара без щита); проверяется первым, поэтому после гибели уровень не меняется; `over` терминальна: коллизий нет, волна обновляется дальше; (2) когда все враги `dead` — `cleared` (`phaseTicks = 0`, вражеские выстрелы в полёте снимаются — `wave.clearShots()`);
   через `LEVEL_PAUSE_TICKS = 90` (1,5 с, без надписи) — `level++`, новая `Wave`
   (рисуется в этом тике в начальных позициях, первый `update` — в следующем),
   `bonuses?.startLevel()` (новый тик появления; астероид и капсула остаются), `playing`.
@@ -339,27 +345,32 @@ bonuses? }` (уровень по умолчанию 1, таблица — `LEVEL
   враги (в порядке `wave.enemies`, спрайт из `ENEMY_KINDS`) → корабль,
   координаты через `Math.floor`; фон не рисует. `dead` — пропуск; `exploding` — кадр
   `EXPLOSION_FRAMES[floor(stateTicks / EXPLOSION_FRAME_TICKS)]`, центрированный в
-  прямоугольнике врага. Корабль — по состоянию: `active` — спрайт; `down` — взрыв
+  прямоугольнике врага. Корабль — по состоянию: `active` — спрайт и дуга щита
+  `SHIELD_SPRITES[shield]` в `(x, y + SHIELD_OFFSET_Y)` после спрайта (при `shield = 0` дуги
+  нет); `down` — только взрыв
   (общий с врагами `drawExplosion`, по центру прямоугольника 15 × 16 на месте поражения)
   `EXPLOSION_TICKS` тиков, затем ничего; `invulnerable` — мигание `BLINK_TICKS = 4`
-  (4 тика виден, 4 скрыт; виден в тике входа). Выстрел игрока рисуется в любом
+  (4 тика виден, 4 скрыт; виден в тике входа), дуга мигает вместе с кораблём. Выстрел игрока рисуется в любом
   состоянии корабля.
-- `hud.ts` — модель панели без canvas: `HudView { level, score, lives, powerUps }` (`lives` — общее
-  число, включая корабль на поле; `powerUps` — `battle.player.powerUps`, неизменяемый снимок), `hudView(battle)` (уровень — `battle.level`, жизни —
-  `battle.player.lives`, счёт — `battle.score`), `formatScore`
+- `hud.ts` — модель панели без canvas: `HudView { level, score, shield, powerUps }` (`shield` — уровень
+  щита `0…MAX_SHIELD`; `powerUps` — `battle.player.powerUps`, неизменяемый снимок), `hudView(battle)` (уровень — `battle.level`, щит —
+  `battle.player.shield`, счёт — `battle.score`), `formatScore`
   (6 цифр с ведущими нулями, длиннее — целиком), `formatLevel`; раскладка:
   `HUD_HEIGHT = 24`, `HUD_MARGIN_X = 8`, строки `HUD_LABEL_Y = 4` / `HUD_VALUE_Y = 14`,
   `HudZone`, `SCORE_ZONE` (8, 4, 48×17), `LEVEL_ZONE` (108, 4, 40×17; номер — по центру
   под подписью: `levelValueX(text)` = `x + floor((40 − textWidth(text)) / 2)`, +16 для
-  1 цифры, +12 для 2; влезает до 5 цифр; счёт — по левому краю), `LIVES_ZONE` (200, 14, 48×8; иконки от правого края, шаг
-  `LIFE_ICON_STEP = 10`, `LIVES_ICON_SLOTS = 5`, предел иконки `LIFE_ICON_MAX_SIZE = 8`),
-  `POWER_UPS_ZONE` (156, 14, 18×8; строка значений между уровнем и жизнями, без подписи),
+  1 цифры, +12 для 2; влезает до 5 цифр; счёт — по левому краю), `SHIELD_ZONE` (200, 14, 48×8; `MAX_SHIELD`
+  сегментов `SHIELD_SEGMENT_WIDTH × SHIELD_SEGMENT_HEIGHT` = 8×4 на `SHIELD_SEGMENT_Y = 16`,
+  x = `shieldSegmentX(i)` = 200 + 10·i; ширина от `MAX_SHIELD`, импорт из `player.ts`),
+  предел значка `HUD_ICON_SIZE = 8`, шаг `HUD_ICON_STEP = 10`,
+  `POWER_UPS_ZONE` (156, 14, 18×8; строка значений между уровнем и шкалой щита, без подписи),
   `POWER_UP_SLOT_KINDS` (порядок слотов `fastShot`, `doubleShot`), `POWER_UP_SLOT_X`
-  (фиксированные x: `fastShot` 156, `doubleShot` 166, шаг `LIFE_ICON_STEP`),
+  (фиксированные x: `fastShot` 156, `doubleShot` 166, шаг `HUD_ICON_STEP`),
   `HUD_ZONES` — для теста непересечения. Новая секция = поле `HudView` + зона + `drawX`.
-- `hud-render.ts` — `drawHud(ctx, view)`: секции счёт → уровень → жизни → улучшения, каждая рисует
+- `hud-render.ts` — `drawHud(ctx, view)`: секции счёт → уровень → щит → улучшения, каждая рисует
   только в своей зоне; подписи `HUD_LABEL_COLOR`, значения `HUD_VALUE_COLOR` через
-  `drawText`, иконки — `drawSprite` (своей палитрой), не больше `LIVES_ICON_SLOTS`; иконки улучшений —
+  `drawText`; `drawShield` рисует всегда `MAX_SHIELD` прямоугольников `fillRect`: `i < shield` —
+  `SHIELD_COLORS[shield]`, иначе `SHIELD_GAUGE_EMPTY_COLOR`; шкала не мигает; иконки улучшений —
   `CAPSULE_SPRITES[kind]` (тот же спрайт, что капсула на поле) в фиксированном слоте, только
   для включённых; фон не рисует.
 - `game-over-render.ts` — `drawGameOver(ctx, phaseTicks, backdrop = GAME_OVER_BACKDROP)`:

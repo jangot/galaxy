@@ -13,7 +13,7 @@ import { CAPSULE_SIZE } from './capsule';
 import { EXPLOSION_TICKS, PEEL_SEGMENTS, STRIKER_TURN_TICKS } from './enemy';
 import { LEVELS } from './levels';
 import type { PlayerIntent } from './player';
-import { DOWN_TICKS, MAX_LIVES, START_LIVES } from './player';
+import { INVULNERABLE_TICKS, MAX_SHIELD, START_SHIELD } from './player';
 import { asteroidPoints, BONUS_FALLBACK_POINTS, killPoints } from './score';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y } from './ship';
 import type { Shot } from './shot';
@@ -42,9 +42,9 @@ function ramShip(battle: Battle): void {
   enemy.y = SHIP_Y + 2;
 }
 
-/** A one-enemy battle with a single life, already in over. */
+/** A one-enemy battle with no shield, already in over. */
 function overBattle(): Battle {
-  const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+  const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, shield: 0 });
   battle.player.hit();
   run(battle, GAME_OVER_DELAY_TICKS);
   expect(battle.phase).toBe('over');
@@ -237,8 +237,8 @@ describe('Battle aim', () => {
 describe('Battle ram', () => {
   const RAM_LEVEL = [passiveLevel(['S..........'], { firstDiveDelayTicks: 1 })];
 
-  it('a diver touching the ship explodes and puts the ship down', () => {
-    const battle = new Battle(createRng(1), { levels: RAM_LEVEL });
+  /** Brings the RAM_LEVEL striker out and puts it onto the ship; the ram happens next update. */
+  function diverOnShip(battle: Battle): void {
     const enemy = battle.wave.enemies[0]!;
     for (let i = 0; i < 10 && !enemy.isOut; i++) run(battle, 1);
     expect(enemy.isOut).toBe(true);
@@ -246,14 +246,38 @@ describe('Battle ram', () => {
     // A margin against the up to 3 px peel step of this tick.
     enemy.x = ship.x + 2;
     enemy.y = SHIP_Y + 2;
+  }
+
+  it('a diver touching the ship explodes and takes a shield level', () => {
+    const battle = new Battle(createRng(1), { levels: RAM_LEVEL });
+    const enemy = battle.wave.enemies[0]!;
+    diverOnShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(enemy.state).toBe('exploding');
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(START_SHIELD - 1);
+  });
+
+  it('a diver touching the ship with no shield puts the ship down', () => {
+    const battle = new Battle(createRng(1), { levels: RAM_LEVEL, shield: 0 });
+    const enemy = battle.wave.enemies[0]!;
+    diverOnShip(battle);
     battle.update(TICK_SECONDS, IDLE);
     expect(enemy.state).toBe('exploding');
     expect(battle.player.state).toBe('down');
   });
 
+  it('keeps the ship targeted while invulnerable', () => {
+    const battle = new Battle(createRng(1), { levels: RAM_LEVEL });
+    diverOnShip(battle);
+    battle.player.hit();
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.canBeTargeted).toBe(true);
+  });
+
   it('gives the wave no target while the ship is down', () => {
     const P = PEEL_SEGMENTS.reduce((sum, s) => sum + s.ticks, 0);
-    const battle = new Battle(createRng(1), { levels: RAM_LEVEL });
+    const battle = new Battle(createRng(1), { levels: RAM_LEVEL, shield: 0 });
     run(battle, 1 + P + 1);
     const enemy = battle.wave.enemies[0]!;
     expect(enemy.state).toBe('diving');
@@ -287,7 +311,7 @@ describe('Battle enemy shots', () => {
     expect(battle.player.state).toBe('active');
   });
 
-  it('an enemy shot puts the ship down through update()', () => {
+  it('an enemy shot takes a shield level through update()', () => {
     const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY });
     const enemy = battle.wave.enemies[0]!;
     enemy.startDive(diveOrder({ shots: 1 }));
@@ -300,21 +324,24 @@ describe('Battle enemy shots', () => {
       if (battle.wave.shots.length > 0) sawShot = true;
     }
     expect(sawShot).toBe(true);
-    expect(battle.player.state).toBe('down');
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(START_SHIELD - 1);
     expect(battle.wave.shots).toHaveLength(0);
     expect(enemy.state).toBe('diving');
   });
 });
 
-describe('Battle lives and game over', () => {
-  it('passes opts.lives to the player', () => {
-    expect(new Battle(createRng(1)).player.lives).toBe(START_LIVES);
-    expect(new Battle(createRng(1), { lives: 1 }).player.lives).toBe(1);
-    expect(() => new Battle(createRng(1), { lives: 0 })).toThrow(RangeError);
+describe('Battle shield and game over', () => {
+  it('passes opts.shield to the player', () => {
+    expect(new Battle(createRng(1)).player.shield).toBe(START_SHIELD);
+    expect(new Battle(createRng(1), { shield: 0 }).player.shield).toBe(0);
+    expect(new Battle(createRng(1), { shield: MAX_SHIELD }).player.shield).toBe(MAX_SHIELD);
+    expect(() => new Battle(createRng(1), { shield: -1 })).toThrow(RangeError);
+    expect(() => new Battle(createRng(1), { shield: MAX_SHIELD + 1 })).toThrow(RangeError);
   });
 
-  it('enters over exactly GAME_OVER_DELAY_TICKS after the last ship is hit', () => {
-    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+  it('enters over exactly GAME_OVER_DELAY_TICKS after the fatal hit', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, shield: 0 });
     battle.player.hit();
     run(battle, GAME_OVER_DELAY_TICKS - 1);
     expect(battle.phase).toBe('playing');
@@ -324,17 +351,20 @@ describe('Battle lives and game over', () => {
     expect(battle.phaseTicks).toBe(0);
   });
 
-  it('does not enter over while lives are left', () => {
-    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 2 });
+  it('a shield hit does not end the game', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, shield: 1 });
     battle.player.hit();
     run(battle, GAME_OVER_DELAY_TICKS);
     expect(battle.phase).toBe('playing');
     expect(battle.player.state).toBe('invulnerable');
-    expect(battle.player.lives).toBe(1);
+    expect(battle.player.shield).toBe(0);
+    run(battle, INVULNERABLE_TICKS);
+    expect(battle.player.state).toBe('active');
+    expect(battle.phase).toBe('playing');
   });
 
-  it('ends the game, not the level, when the last ship rams the last enemy', () => {
-    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, lives: 1 });
+  it('ends the game, not the level, when the unshielded ship rams the last enemy', () => {
+    const battle = new Battle(createRng(1), { levels: ONE_CORNER_ENEMY, shield: 0 });
     const enemy = battle.wave.enemies[0]!;
     ramShip(battle);
     battle.update(TICK_SECONDS, IDLE);
@@ -363,7 +393,7 @@ describe('Battle lives and game over', () => {
     run(battle, 1);
     expect(enemy.isOut).toBe(true);
     expect(battle.phase).toBe('over');
-    expect(battle.player.lives).toBe(0);
+    expect(battle.player.shield).toBe(0);
   });
 
   it('keeps the wave flying in over', () => {
@@ -402,9 +432,9 @@ describe('Battle lives and game over', () => {
   });
 });
 
-// Extra-life tests reach 5000 with one kill: past the end of a passive table levelConfig
+// Shield threshold tests reach 5000 with one kill: past the end of a passive table levelConfig
 // only shrinks the 1_000_000-tick dive timers (still passive) and killPoints has no cap (В2),
-// so a high startLevel gives exactly EXTRA_LIFE_FIRST in one kill without widening Battle's API.
+// so a high startLevel gives exactly EXTRA_SHIELD_FIRST in one kill without widening Battle's API.
 /** A drone in formation is worth exactly 5000 here (1655 gives 4990). */
 const DRONE_5000_LEVEL = 1656;
 /** A rammed striker (in flight) is worth exactly 5000 here (615 gives 4990). */
@@ -431,7 +461,7 @@ describe('Battle score', () => {
     ramShip(battle);
     battle.update(TICK_SECONDS, IDLE);
     expect(battle.wave.enemies[0]!.state).toBe('exploding');
-    expect(battle.player.state).toBe('down');
+    expect(battle.player.state).toBe('invulnerable');
     expect(battle.score).toBe(80);
   });
 
@@ -467,7 +497,7 @@ describe('Battle score', () => {
   });
 });
 
-describe('Battle extra lives', () => {
+describe('Battle shield thresholds', () => {
   it('uses levels where one kill is worth exactly 5000', () => {
     expect(killPoints({ kind: 'drone', inFlight: false }, DRONE_5000_LEVEL)).toBe(5000);
     expect(killPoints({ kind: 'drone', inFlight: false }, DRONE_5000_LEVEL - 1)).toBe(4990);
@@ -475,63 +505,76 @@ describe('Battle extra lives', () => {
     expect(killPoints({ kind: 'striker', inFlight: true }, STRIKER_RAM_5000_LEVEL - 1)).toBe(4990);
   });
 
-  it('gives a life when the score crosses 5000', () => {
+  it('gives a shield level when the score crosses 5000', () => {
     const battle = new Battle(createRng(1), {
       levels: ONE_CORNER_ENEMY,
       startLevel: DRONE_5000_LEVEL,
     });
     shootCornerEnemy(battle);
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
   });
 
-  it('does not go over MAX_LIVES', () => {
+  it('does not go over MAX_SHIELD', () => {
     const battle = new Battle(createRng(1), {
       levels: ONE_CORNER_ENEMY,
       startLevel: DRONE_5000_LEVEL,
-      lives: MAX_LIVES,
+      shield: MAX_SHIELD,
     });
     shootCornerEnemy(battle);
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(MAX_LIVES);
+    expect(battle.player.shield).toBe(MAX_SHIELD);
   });
 
-  it('charges a lost ship before the extra life', () => {
+  it('charges the hit before the threshold: max -> max - 1 -> max', () => {
     const battle = new Battle(createRng(1), {
       levels: [passiveLevel(['S..........'])],
       startLevel: STRIKER_RAM_5000_LEVEL,
-      lives: MAX_LIVES,
+      shield: MAX_SHIELD,
+    });
+    ramShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.score).toBe(5000);
+    expect(battle.player.shield).toBe(MAX_SHIELD); // 5 -> 4 -> 5
+  });
+
+  it('a ram at shield 0 that crosses a threshold still ends the game', () => {
+    const battle = new Battle(createRng(1), {
+      levels: [passiveLevel(['S..........'])],
+      startLevel: STRIKER_RAM_5000_LEVEL,
+      shield: 0,
     });
     ramShip(battle);
     battle.update(TICK_SECONDS, IDLE);
     expect(battle.player.state).toBe('down');
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(MAX_LIVES); // 5 -> 4 -> 5
+    expect(battle.player.shield).toBe(0);
+    run(battle, GAME_OVER_DELAY_TICKS);
+    expect(battle.phase).toBe('over');
   });
 
-  it('an extra life in down at 0 lives cancels game over', () => {
+  it('a threshold crossed while down does not cancel game over', () => {
     const battle = new Battle(createRng(1), {
       levels: ONE_CORNER_ENEMY,
       startLevel: DRONE_5000_LEVEL,
-      lives: 1,
+      shield: 0,
     });
     battle.player.ship.x = 40; // shot column x = 47
-    battle.update(TICK_SECONDS, FIRE); // the shot leaves the live ship
-    battle.player.hit(); // the last ship is lost with the shot in flight
+    battle.update(TICK_SECONDS, FIRE); // the shot leaves the ship
+    battle.player.hit(); // the ship is lost with the shot in flight
     expect(battle.player.isLost).toBe(true);
     onlyShot(battle.player)!.y = 42;
     battle.update(TICK_SECONDS, IDLE); // stateTicks = 1: the shot hits, 5000 points
     expect(battle.wave.enemies[0]!.state).toBe('exploding');
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(1);
-    expect(battle.player.isLost).toBe(false);
+    expect(battle.player.shield).toBe(0);
+    expect(battle.player.isLost).toBe(true);
     run(battle, GAME_OVER_DELAY_TICKS - 2);
     expect(battle.player.state).toBe('down');
-    run(battle, 1); // DOWN_TICKS since the hit
-    expect(battle.player.state).toBe('invulnerable');
     expect(battle.phase).not.toBe('over');
-    run(battle, GAME_OVER_DELAY_TICKS);
-    expect(battle.phase).not.toBe('over');
+    run(battle, 1); // GAME_OVER_DELAY_TICKS since the hit
+    expect(battle.phase).toBe('over');
   });
 });
 
@@ -600,7 +643,7 @@ describe('Battle asteroid', () => {
       enemies: b.wave.enemies.map((e) => [e.x, e.y, e.state]),
       shots: b.wave.shots.length,
       state: b.player.state,
-      lives: b.player.lives,
+      shield: b.player.shield,
       phase: b.phase,
     });
     expect(snapshot(withBonuses)).toEqual(snapshot(plain));
@@ -649,7 +692,7 @@ describe('Battle asteroid', () => {
     asteroid.y = SHIP_Y - 2;
     run(battle, 10);
     expect(battle.player.state).toBe('active');
-    expect(battle.player.lives).toBe(START_LIVES);
+    expect(battle.player.shield).toBe(START_SHIELD);
     expect(battle.score).toBe(0);
     expect(asteroid.state).toBe('flying');
   });
@@ -739,7 +782,7 @@ describe('Battle asteroid', () => {
   });
 
   it('is not hit in over', () => {
-    const battle = bonusBattle({ lives: 1 });
+    const battle = bonusBattle({ shield: 0 });
     const asteroid = spawnAsteroid(battle);
     fire(battle);
     battle.player.hit();
@@ -761,13 +804,13 @@ describe('Battle asteroid', () => {
     expect(asteroidPoints(ASTEROID_5000_LEVEL - 1)).toBe(4990);
   });
 
-  it('asteroid points give an extra life at 5000', () => {
+  it('asteroid points give a shield level at 5000', () => {
     const battle = bonusBattle({ startLevel: ASTEROID_5000_LEVEL });
     const asteroid = spawnAsteroid(battle);
     asteroidOverShot(asteroid, fire(battle));
     battle.update(TICK_SECONDS, IDLE);
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
   });
 });
 
@@ -814,20 +857,20 @@ describe('Battle capsule', () => {
     expect(capsule.y).toBe(198);
     run(battle, 2);
     expect(battle.bonuses!.capsule).toBe(capsule); // y = 200: touches the ship, no overlap yet
-    expect(battle.player.lives).toBe(START_LIVES);
+    expect(battle.player.shield).toBe(START_SHIELD);
   });
 
-  it('life: +1 life', () => {
+  it('shield: +1 level', () => {
     const battle = bonusBattle();
     catchCapsule(battle);
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
     expect(battle.score).toBe(100);
   });
 
-  it('life at MAX_LIVES: BONUS_FALLBACK_POINTS instead', () => {
-    const battle = bonusBattle({ lives: MAX_LIVES });
+  it('shield at MAX_SHIELD: BONUS_FALLBACK_POINTS instead', () => {
+    const battle = bonusBattle({ shield: MAX_SHIELD });
     catchCapsule(battle);
-    expect(battle.player.lives).toBe(MAX_LIVES);
+    expect(battle.player.shield).toBe(MAX_SHIELD);
     expect(battle.score).toBe(100 + BONUS_FALLBACK_POINTS);
   });
 
@@ -860,15 +903,14 @@ describe('Battle capsule', () => {
       expect(battle.score).toBe(100 + BONUS_FALLBACK_POINTS);
       expect(battle.score).toBe(600);
       expect(battle.player.powerUps).toEqual(powerUps);
-      expect(battle.player.lives).toBe(START_LIVES);
+      expect(battle.player.shield).toBe(START_SHIELD);
     },
   );
 
-  it('power-ups survive the loss of a ship', () => {
+  it('power-ups survive a shield hit', () => {
     const battle = bonusBattle({ bonuses: { rng: kindRng('fastShot') } });
     catchCapsule(battle);
     battle.player.hit();
-    run(battle, DOWN_TICKS);
     expect(battle.player.state).toBe('invulnerable');
     expect(battle.player.powerUps.fastShot).toBe(true);
     expect(fire(battle).speed).toBe(FAST_SHOT_SPEED);
@@ -886,7 +928,7 @@ describe('Battle capsule', () => {
   });
 
   it('a ship lost on the touching tick does not take it; the capsule falls away', () => {
-    const battle = bonusBattle();
+    const battle = bonusBattle({ shield: 0 });
     asteroidOverShot(spawnAsteroid(battle), fire(battle));
     battle.update(TICK_SECONDS, IDLE);
     const capsule = battle.bonuses!.capsule!;
@@ -894,12 +936,28 @@ describe('Battle capsule', () => {
     ramShip(battle);
     battle.update(TICK_SECONDS, IDLE);
     expect(battle.player.state).toBe('down');
-    expect(battle.player.lives).toBe(START_LIVES - 1);
+    expect(battle.player.shield).toBe(0);
     expect(battle.bonuses!.capsule).toBe(capsule);
     expect(capsule.y).toBe(SHIP_Y - CAPSULE_SIZE + 1);
     run(battle, SCREEN_HEIGHT);
     expect(battle.bonuses!.capsule).toBeNull();
-    expect(battle.player.lives).toBe(START_LIVES - 1);
+    expect(battle.player.shield).toBe(0);
+  });
+
+  it('a shield hit and the capsule on the same tick: -1, then +1', () => {
+    const battle = bonusBattle();
+    expect(BONUS_KINDS[0]).toBe('shield');
+    asteroidOverShot(spawnAsteroid(battle), fire(battle));
+    battle.update(TICK_SECONDS, IDLE);
+    const capsule = battle.bonuses!.capsule!;
+    expect(capsule.kind).toBe('shield');
+    capsule.y = SHIP_Y - CAPSULE_SIZE; // overlaps the ship from the next update
+    ramShip(battle);
+    battle.update(TICK_SECONDS, IDLE);
+    expect(battle.player.state).toBe('invulnerable');
+    expect(battle.player.shield).toBe(START_SHIELD);
+    expect(battle.bonuses!.capsule).toBeNull();
+    expect(battle.score).toBe(100 + killPoints({ kind: 'drone', inFlight: true }, 1));
   });
 
   it('is caught in cleared', () => {
@@ -913,12 +971,12 @@ describe('Battle capsule', () => {
     expect(battle.bonuses!.capsule).not.toBeNull();
     for (let i = 0; i < 10 && battle.bonuses!.capsule; i++) battle.update(TICK_SECONDS, IDLE);
     expect(battle.bonuses!.capsule).toBeNull();
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
     expect(battle.phase).toBe('cleared');
   });
 
   it('is not caught in over and falls away', () => {
-    const battle = bonusBattle({ lives: 1 });
+    const battle = bonusBattle({ shield: 0 });
     asteroidOverShot(spawnAsteroid(battle), fire(battle));
     battle.update(TICK_SECONDS, IDLE);
     const capsule = battle.bonuses!.capsule!;
@@ -935,7 +993,7 @@ describe('Battle capsule', () => {
     run(battle, SCREEN_HEIGHT);
     expect(battle.bonuses!.capsule).toBeNull();
     expect(battle.score).toBe(100);
-    expect(battle.player.lives).toBe(0);
+    expect(battle.player.shield).toBe(0);
   });
 
   it('uses a level where the asteroid is worth exactly 4500', () => {
@@ -943,7 +1001,7 @@ describe('Battle capsule', () => {
     expect(asteroidPoints(ASTEROID_4500_LEVEL - 1)).toBeLessThan(4500);
   });
 
-  it('BONUS_FALLBACK_POINTS cross an extra-life threshold', () => {
+  it('BONUS_FALLBACK_POINTS cross a shield threshold', () => {
     const battle = bonusBattle({
       startLevel: ASTEROID_4500_LEVEL,
       bonuses: { rng: kindRng('fastShot') },
@@ -951,7 +1009,7 @@ describe('Battle capsule', () => {
     battle.player.grantPowerUp('fastShot');
     catchCapsule(battle);
     expect(battle.score).toBe(5000);
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
   });
 
   it('an asteroid broken at the ship height gives its bonus in the same tick', () => {
@@ -961,17 +1019,17 @@ describe('Battle capsule', () => {
     battle.update(TICK_SECONDS, IDLE);
     expect(asteroid.state).toBe('exploding');
     expect(battle.bonuses!.capsule).toBeNull();
-    expect(battle.player.lives).toBe(START_LIVES + 1);
+    expect(battle.player.shield).toBe(START_SHIELD + 1);
     expect(battle.score).toBe(100);
   });
 
-  it('applies the bonus after the asteroid points: L is useless once they gave the 5th life', () => {
-    const battle = bonusBattle({ startLevel: ASTEROID_5000_LEVEL, lives: MAX_LIVES - 1 });
+  it('applies the bonus after the asteroid points: L is useless once they gave the max shield', () => {
+    const battle = bonusBattle({ startLevel: ASTEROID_5000_LEVEL, shield: MAX_SHIELD - 1 });
     const asteroid = spawnAsteroid(battle);
     asteroidAtShip(asteroid, fire(battle));
     battle.update(TICK_SECONDS, IDLE);
     expect(battle.bonuses!.capsule).toBeNull();
     expect(battle.score).toBe(5000 + BONUS_FALLBACK_POINTS);
-    expect(battle.player.lives).toBe(MAX_LIVES);
+    expect(battle.player.shield).toBe(MAX_SHIELD);
   });
 });

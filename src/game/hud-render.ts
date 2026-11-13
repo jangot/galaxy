@@ -1,4 +1,4 @@
-import { HUD_LABEL_COLOR, HUD_VALUE_COLOR, LIFE_ICON_SPRITE } from './art';
+import { HUD_LABEL_COLOR, HUD_VALUE_COLOR, SHIELD_COLORS, SHIELD_GAUGE_EMPTY_COLOR } from './art';
 import type { PowerUps } from './bonus';
 import { CAPSULE_SPRITES } from './bonus-art';
 import { drawText } from './font';
@@ -11,25 +11,28 @@ import {
   LEVEL_LABEL,
   LEVEL_ZONE,
   levelValueX,
-  LIFE_ICON_STEP,
-  LIVES_ICON_SLOTS,
-  LIVES_ZONE,
   POWER_UP_SLOT_KINDS,
   POWER_UP_SLOT_X,
   POWER_UPS_ZONE,
   SCORE_LABEL,
   SCORE_ZONE,
+  SHIELD_SEGMENT_HEIGHT,
+  SHIELD_SEGMENT_WIDTH,
+  SHIELD_SEGMENT_Y,
+  shieldSegmentX,
 } from './hud';
+import { MAX_SHIELD } from './player';
 import { drawSprite } from './sprite';
 
 /**
- * Draws the top HUD over the scene, no background: score, level, lives, power-ups sections.
+ * Draws the top HUD over the scene, no background: score, level, shield gauge, power-ups
+ * sections.
  * Each section draws only inside its own zone (see hud.ts); a new section adds a drawX here.
  */
 export function drawHud(ctx: CanvasRenderingContext2D, view: HudView): void {
   drawScore(ctx, view.score);
   drawLevel(ctx, view.level);
-  drawLives(ctx, view.lives);
+  drawShield(ctx, view.shield);
   drawPowerUps(ctx, view.powerUps);
 }
 
@@ -56,12 +59,16 @@ function drawLevel(ctx: CanvasRenderingContext2D, level: number): void {
   drawLabeled(ctx, LEVEL_ZONE, LEVEL_LABEL, text, levelValueX(text));
 }
 
-/** Icons from the zone's right edge leftwards; icon 0 is the rightmost. At most LIVES_ICON_SLOTS. */
-function drawLives(ctx: CanvasRenderingContext2D, lives: number): void {
-  const rightmostX = LIVES_ZONE.x + LIVES_ZONE.width - LIFE_ICON_SPRITE.width;
-  const count = Math.min(lives, LIVES_ICON_SLOTS);
-  for (let i = 0; i < count; i++) {
-    drawSprite(ctx, LIFE_ICON_SPRITE, rightmostX - i * LIFE_ICON_STEP, LIVES_ZONE.y);
+/**
+ * Shield gauge: MAX_SHIELD segments left to right; the first `shield` are filled with the
+ * current level's color (the whole gauge in one color, like the arc), the rest are empty.
+ * Always drawn, all empty at shield 0. Not blinking: it shows the value, not the ship.
+ */
+function drawShield(ctx: CanvasRenderingContext2D, shield: number): void {
+  const filled = SHIELD_COLORS[shield] ?? SHIELD_GAUGE_EMPTY_COLOR;
+  for (let i = 0; i < MAX_SHIELD; i++) {
+    ctx.fillStyle = i < shield ? filled : SHIELD_GAUGE_EMPTY_COLOR;
+    ctx.fillRect(shieldSegmentX(i), SHIELD_SEGMENT_Y, SHIELD_SEGMENT_WIDTH, SHIELD_SEGMENT_HEIGHT);
   }
 }
 

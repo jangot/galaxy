@@ -8,6 +8,7 @@ import { BONUS_KINDS } from './bonus';
 import { ASTEROID_SPAWN_MAX_TICKS, ASTEROID_SPAWN_MIN_TICKS } from './bonus-field';
 import { snapshotScene } from './dev-snapshot';
 import { EXPLOSION_TICKS } from './enemy';
+import { START_SHIELD } from './player';
 import { SHIP_Y } from './ship';
 import { PlayScene } from './scenes/play-scene';
 import { step } from './scenes/scene-test-utils';
@@ -45,7 +46,7 @@ describe('snapshotScene', () => {
     expect(b.level).toBe(1);
     expect(b.phase).toBe('playing');
     expect(b.score).toBe(0);
-    expect(b.lives).toBe(3);
+    expect(b.shield).toBe(START_SHIELD);
     expect(b.enemies.alive).toBe(28);
     expect(b.enemies.list).toHaveLength(28);
     expect(b.enemies.shots).toEqual([]);
@@ -62,17 +63,17 @@ describe('snapshotScene', () => {
     expect(b.bonuses!.retryBonus).toBeNull();
   });
 
-  it('shows a hit: one life less, the ship down', () => {
+  it('shows a shield hit: one level less, the ship blinking', () => {
     const scene = new PlayScene(createRng(1));
     scene.battle.player.hit();
     step(scene, new Input());
     const b = battleOf(scene);
-    expect(b.lives).toBe(2);
-    expect(b.player.state).toBe('down');
+    expect(b.shield).toBe(START_SHIELD - 1);
+    expect(b.player.state).toBe('invulnerable');
   });
 
   it("names game over 'over'", () => {
-    const scene = new PlayScene(createRng(1), undefined, { lives: 1 });
+    const scene = new PlayScene(createRng(1), undefined, { shield: 0 });
     scene.battle.player.hit();
     step(scene, new Input(), GAME_OVER_DELAY_TICKS);
     const s = snap(scene);

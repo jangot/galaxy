@@ -2,24 +2,21 @@ import type { Input } from '../engine/input';
 import type { PowerUpKind, PowerUps } from './bonus';
 import { NO_POWER_UPS } from './bonus';
 import type { MoveDir } from './ship';
-import { SHIP_START_X, Ship } from './ship';
+import { Ship } from './ship';
 import type { Shot } from './shot';
 import { FAST_SHOT_SPEED, SHOT_SPEED } from './shot';
 
 /**
- * Ship states: active -hit()-> down -DOWN_TICKS, lives > 0-> invulnerable -INVULNERABLE_TICKS->
- * active. down with 0 lives (isLost) stays down until addLife() brings a life back; otherwise
- * for good, the battle ends the game.
+ * Ship states: active -hit(), shield > 0-> invulnerable -INVULNERABLE_TICKS-> active;
+ * active -hit(), shield = 0-> down, terminal (isLost): the battle ends the game.
  */
 export type ShipState = 'active' | 'down' | 'invulnerable';
-/** Ship is gone after a hit, ticks (owner decision В5: 1 s). Must be > EXPLOSION_TICKS. */
-export const DOWN_TICKS = 60;
-/** Blinking, untouchable but controllable after the respawn, ticks (В5: 2 s). */
+/** Blinking, untouchable but controllable after a shield hit, ticks (feature 008, В4: 2 s). */
 export const INVULNERABLE_TICKS = 120;
-/** Total lives at the start, including the ship on the field (owner decision В4). */
-export const START_LIVES = 3;
-/** Cap for addLife (owner decision В4); LIVES_ICON_SLOTS >= MAX_LIVES is checked by a test. */
-export const MAX_LIVES = 5;
+/** Shield level at the start: survives 2 hits, the 3rd one ends the game (feature 008, В1). */
+export const START_SHIELD = 2;
+/** Cap for addShield (В1); also the number of HUD shield gauge segments. */
+export const MAX_SHIELD = 5;
 
 /** What the player wants to do this tick, decoupled from the keyboard. */
 export interface PlayerIntent {
@@ -40,12 +37,11 @@ export function readIntent(input: Input): PlayerIntent {
  * than maxShots are in flight; otherwise it is ignored, not buffered. A shot leaves the list
  * when it goes offscreen or hits something (removeShot).
  * Power-ups (grantPowerUp) stay until the game ends: hit() keeps them.
- * Ship state: active --hit()--> down [lives - 1] --DOWN_TICKS, lives > 0--> invulnerable
- * --INVULNERABLE_TICKS--> active.
- * down with 0 lives (isLost): stays down until addLife() brings a life back; otherwise for
- * good, the battle ends the game.
- * down: intent is ignored, no hits, no target, only the shots in flight keep flying.
- * invulnerable: respawned at SHIP_START_X, controllable and targetable, but cannot be hit.
+ * Shield: an integer 0..MAX_SHIELD. Ship state: active --hit(), shield > 0--> invulnerable
+ * [shield - 1] --INVULNERABLE_TICKS--> active; active --hit(), shield = 0--> down, terminal.
+ * down (isLost): intent is ignored, no hits, no target, only the shots in flight keep flying;
+ * the battle ends the game.
+ * invulnerable: stays where it was hit, controllable and targetable, but cannot be hit.
  * Tick rule (as in Enemy): entering a state sets stateTicks = 0; each update counts the tick,
  * applies the timer transition, then acts in the (new) state.
  */
@@ -55,18 +51,15 @@ export class Player {
   private currentPowerUps: PowerUps = NO_POWER_UPS;
   private currentState: ShipState = 'active';
   private ticksInState = 0;
-  private livesLeft: number;
+  private shieldLevel: number;
 
-  /**
-   * lives: total including the ship on the field; an integer in 1..MAX_LIVES,
-   * throws RangeError otherwise.
-   */
-  constructor(ship: Ship = new Ship(), lives: number = START_LIVES) {
-    if (!Number.isInteger(lives) || lives < 1 || lives > MAX_LIVES) {
-      throw new RangeError(`lives must be an integer in 1..${MAX_LIVES}, got ${lives}`);
+  /** shield: an integer in 0..MAX_SHIELD, throws RangeError otherwise. */
+  constructor(ship: Ship = new Ship(), shield: number = START_SHIELD) {
+    if (!Number.isInteger(shield) || shield < 0 || shield > MAX_SHIELD) {
+      throw new RangeError(`shield must be an integer in 0..${MAX_SHIELD}, got ${shield}`);
     }
     this.ship = ship;
-    this.livesLeft = lives;
+    this.shieldLevel = shield;
   }
 
   /**
@@ -97,14 +90,14 @@ export class Player {
     return this.ticksInState;
   }
 
-  /** Total lives including the ship on the field; drops on the hit tick. */
-  get lives(): number {
-    return this.livesLeft;
+  /** Shield level 0..MAX_SHIELD; drops on the hit tick. Hits survivable = shield. */
+  get shield(): number {
+    return this.shieldLevel;
   }
 
-  /** No lives left: the ship stays down (until addLife), stateTicks keeps growing. */
+  /** The only ship is down: terminal, stateTicks keeps growing. */
   get isLost(): boolean {
-    return this.livesLeft === 0;
+    return this.currentState === 'down';
   }
 
   /** Collisions with the ship are checked only while active. */
@@ -136,24 +129,30 @@ export class Player {
   }
 
   /**
-   * active -> down and lives - 1; ignored in any other state (no loss, does not restart the
+   * From active only: shield > 0 -> shield - 1 and invulnerable, in place (the ship is not
+   * moved); shield = 0 -> down. Ignored in any other state (no loss, does not restart the
    * timer, so a ram during invulnerable cannot extend it). The shots in flight and the
    * power-ups are kept.
    */
   hit(): void {
     if (this.currentState !== 'active') return;
-    this.livesLeft--;
-    this.enter('down');
+    if (this.shieldLevel > 0) {
+      this.shieldLevel--;
+      this.enter('invulnerable');
+    } else {
+      this.enter('down');
+    }
   }
 
   /**
-   * lives + 1 up to MAX_LIVES (an extra life over the cap is lost), in any state; does not
-   * touch the state or stateTicks. In down with 0 lives it brings the respawn back: the ship
-   * returns on the usual DOWN_TICKS tick counted from the hit. Only Battle calls it (from
-   * addScore, never in over).
+   * shield + 1 below MAX_SHIELD and not down; returns true if the shield grew (false at the
+   * cap or down: a threshold or capsule there is lost). Does not touch the state or
+   * stateTicks (blinking goes on). Only Battle calls it (from addScore and applyBonus).
    */
-  addLife(): void {
-    if (this.livesLeft < MAX_LIVES) this.livesLeft++;
+  addShield(): boolean {
+    if (this.currentState === 'down' || this.shieldLevel >= MAX_SHIELD) return false;
+    this.shieldLevel++;
+    return true;
   }
 
   /**
@@ -162,14 +161,10 @@ export class Player {
    * offscreen shots -> fire (speed by fastShot, limit maxShots). A slot freed by a shot
    * leaving the screen this tick is free at once, and a new shot launches from the ship's
    * updated position without moving this tick.
-   * On the respawn tick the ship is put at SHIP_START_X and this tick's intent already applies.
    */
   update(dt: number, intent: PlayerIntent): void {
     this.ticksInState++;
-    if (this.currentState === 'down' && this.livesLeft > 0 && this.ticksInState >= DOWN_TICKS) {
-      this.enter('invulnerable');
-      this.ship.x = SHIP_START_X;
-    } else if (this.currentState === 'invulnerable' && this.ticksInState >= INVULNERABLE_TICKS) {
+    if (this.currentState === 'invulnerable' && this.ticksInState >= INVULNERABLE_TICKS) {
       this.enter('active');
     }
     const controllable = this.currentState !== 'down';

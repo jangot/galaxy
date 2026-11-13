@@ -45,6 +45,8 @@ export function overlaps(a: Rect, b: Rect): boolean {
  *    the ship is removed and the ship is hit; at most one per tick.
  * 3. Ram: while the ship can be hit, the first enemy out of the formation (diving/returning)
  *    in wave.enemies order that overlaps the ship is killed and the ship is hit; one hit per tick.
+ * A hit is player.hit(): it takes a shield level (the ship blinks, invulnerable) or, with no
+ * shield, puts the ship down.
  * Rule 1 goes first: an enemy shot down this tick is already exploding and cannot ram.
  * Rules 2 and 3 share one hit per tick: after a shot hit the ship can no longer be hit, so a
  * would-be rammer survives and flies on. Player and enemy shots never interact.

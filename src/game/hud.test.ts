@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import { createRng } from '../engine/rng';
-import { LIFE_ICON_SPRITE } from './art';
 import { Battle } from './battle';
 import { NO_POWER_UPS } from './bonus';
 import { CAPSULE_SPRITES } from './bonus-art';
@@ -10,25 +9,29 @@ import {
   formatLevel,
   formatScore,
   HUD_HEIGHT,
+  HUD_ICON_SIZE,
+  HUD_ICON_STEP,
   HUD_LABEL_Y,
+  HUD_MARGIN_X,
   HUD_VALUE_Y,
   HUD_ZONES,
   hudView,
   LEVEL_LABEL,
   LEVEL_ZONE,
   levelValueX,
-  LIFE_ICON_MAX_SIZE,
-  LIFE_ICON_STEP,
-  LIVES_ICON_SLOTS,
-  LIVES_ZONE,
   POWER_UP_SLOT_KINDS,
   POWER_UP_SLOT_X,
   POWER_UPS_ZONE,
   SCORE_DIGITS,
   SCORE_LABEL,
   SCORE_ZONE,
+  SHIELD_SEGMENT_HEIGHT,
+  SHIELD_SEGMENT_WIDTH,
+  SHIELD_SEGMENT_Y,
+  SHIELD_ZONE,
+  shieldSegmentX,
 } from './hud';
-import { MAX_LIVES, START_LIVES } from './player';
+import { MAX_SHIELD, START_SHIELD } from './player';
 import { TWO_LEVELS } from './test-levels';
 import { onlyShot } from './test-shots';
 
@@ -47,23 +50,23 @@ describe('formatting', () => {
 
 describe('hudView', () => {
   it.each([1, 3])(
-    "shows the battle level %i, score 0, the player's lives and no power-ups",
+    "shows the battle level %i, score 0, the player's shield and no power-ups",
     (startLevel) => {
       const battle = new Battle(createRng(1), { levels: TWO_LEVELS, startLevel });
       expect(hudView(battle)).toEqual({
         level: startLevel,
         score: 0,
-        lives: START_LIVES,
+        shield: START_SHIELD,
         powerUps: NO_POWER_UPS,
       });
     },
   );
 
-  it("follows the player's lives", () => {
+  it("follows the player's shield", () => {
     const battle = new Battle(createRng(1), { levels: TWO_LEVELS });
     battle.player.hit();
-    expect(hudView(battle).lives).toBe(START_LIVES - 1);
-    expect(hudView(new Battle(createRng(1), { levels: TWO_LEVELS, lives: 5 })).lives).toBe(5);
+    expect(hudView(battle).shield).toBe(START_SHIELD - 1);
+    expect(hudView(new Battle(createRng(1), { levels: TWO_LEVELS, shield: 5 })).shield).toBe(5);
   });
 
   it('follows the battle score', () => {
@@ -132,7 +135,17 @@ describe('layout', () => {
 
   it('puts the power-ups zone on the value row', () => {
     expect(POWER_UPS_ZONE.y).toBe(HUD_VALUE_Y);
-    expect(POWER_UPS_ZONE.height).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
+    expect(POWER_UPS_ZONE.height).toBeGreaterThanOrEqual(HUD_ICON_SIZE);
+  });
+
+  it('includes the shield zone', () => {
+    expect(HUD_ZONES).toContain(SHIELD_ZONE);
+  });
+
+  it('puts the shield zone on the value row at the right margin', () => {
+    expect(SHIELD_ZONE.y).toBe(HUD_VALUE_Y);
+    expect(SHIELD_ZONE.x + SHIELD_ZONE.width).toBe(SCREEN_WIDTH - HUD_MARGIN_X);
+    expect(SHIELD_ZONE).toEqual({ x: 200, y: 14, width: 48, height: 8 });
   });
 
   it('keeps the label row above the value row', () => {
@@ -165,29 +178,42 @@ describe('capacity', () => {
     expect(zone.y).toBeLessThanOrEqual(HUD_LABEL_Y);
     expect(zone.y + zone.height).toBeGreaterThanOrEqual(HUD_VALUE_Y + GLYPH_HEIGHT);
   });
-
-  it('has an icon slot for every life up to MAX_LIVES', () => {
-    expect(LIVES_ICON_SLOTS).toBeGreaterThanOrEqual(MAX_LIVES);
-  });
-
-  it('fits all lives icon slots', () => {
-    expect(LIVES_ZONE.width).toBeGreaterThanOrEqual(
-      (LIVES_ICON_SLOTS - 1) * LIFE_ICON_STEP + LIFE_ICON_MAX_SIZE,
-    );
-    expect(LIVES_ZONE.height).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
-  });
 });
 
-describe('lives icon', () => {
-  it('stays within the size limit and does not overlap its neighbor', () => {
-    expect(LIFE_ICON_SPRITE.width).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
-    expect(LIFE_ICON_SPRITE.height).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
-    expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(LIFE_ICON_STEP);
-    expect(LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(8); // owner's decision: icon at most 8×8
+describe('shield gauge', () => {
+  it('places segments at integer x with HUD_ICON_STEP, left to right', () => {
+    const xs = Array.from({ length: MAX_SHIELD }, (_, i) => shieldSegmentX(i));
+    expect(xs).toEqual([200, 210, 220, 230, 240]);
+    for (const x of xs) expect(Number.isInteger(x)).toBe(true);
+  });
+
+  it('does not overlap neighboring segments', () => {
+    expect(SHIELD_SEGMENT_WIDTH).toBeLessThanOrEqual(HUD_ICON_STEP);
+  });
+
+  it('fits all MAX_SHIELD segments into the zone', () => {
+    expect(shieldSegmentX(0)).toBeGreaterThanOrEqual(SHIELD_ZONE.x);
+    expect(shieldSegmentX(MAX_SHIELD - 1) + SHIELD_SEGMENT_WIDTH).toBeLessThanOrEqual(
+      SHIELD_ZONE.x + SHIELD_ZONE.width,
+    );
+    expect(SHIELD_SEGMENT_Y).toBeGreaterThanOrEqual(SHIELD_ZONE.y);
+    expect(SHIELD_SEGMENT_Y + SHIELD_SEGMENT_HEIGHT).toBeLessThanOrEqual(
+      SHIELD_ZONE.y + SHIELD_ZONE.height,
+    );
+  });
+
+  it('centers segments vertically in the value row (y = 16...19)', () => {
+    expect(Number.isInteger(SHIELD_SEGMENT_Y)).toBe(true);
+    expect(SHIELD_SEGMENT_Y).toBe(16);
   });
 });
 
 describe('power-up icons', () => {
+  it('keeps the icon size limit within the step', () => {
+    expect(HUD_ICON_SIZE).toBeLessThanOrEqual(HUD_ICON_STEP);
+    expect(HUD_ICON_SIZE).toBeLessThanOrEqual(8); // owner's decision: icon at most 8×8
+  });
+
   it('has exactly one slot for every power-up', () => {
     expect([...POWER_UP_SLOT_KINDS].sort()).toEqual(Object.keys(NO_POWER_UPS).sort());
   });
@@ -196,19 +222,19 @@ describe('power-up icons', () => {
     const x = POWER_UP_SLOT_X[kind];
     expect(Number.isInteger(x)).toBe(true);
     expect(x).toBeGreaterThanOrEqual(POWER_UPS_ZONE.x);
-    expect(x + LIFE_ICON_MAX_SIZE).toBeLessThanOrEqual(POWER_UPS_ZONE.x + POWER_UPS_ZONE.width);
+    expect(x + HUD_ICON_SIZE).toBeLessThanOrEqual(POWER_UPS_ZONE.x + POWER_UPS_ZONE.width);
   });
 
   it('keeps the slots apart', () => {
     for (let i = 1; i < POWER_UP_SLOT_KINDS.length; i++) {
       const prev = POWER_UP_SLOT_X[POWER_UP_SLOT_KINDS[i - 1]!];
       const next = POWER_UP_SLOT_X[POWER_UP_SLOT_KINDS[i]!];
-      expect(next - prev).toBeGreaterThanOrEqual(LIFE_ICON_MAX_SIZE);
+      expect(next - prev).toBeGreaterThanOrEqual(HUD_ICON_SIZE);
     }
   });
 
   it.each(POWER_UP_SLOT_KINDS)('fits the %s capsule sprite into a slot', (kind) => {
-    expect(CAPSULE_SPRITES[kind].width).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
-    expect(CAPSULE_SPRITES[kind].height).toBeLessThanOrEqual(LIFE_ICON_MAX_SIZE);
+    expect(CAPSULE_SPRITES[kind].width).toBeLessThanOrEqual(HUD_ICON_SIZE);
+    expect(CAPSULE_SPRITES[kind].height).toBeLessThanOrEqual(HUD_ICON_SIZE);
   });
 });

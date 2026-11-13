@@ -6,7 +6,7 @@ import { CAPSULE_SIZE } from './capsule';
 import { overlaps, resolveBonusCollisions, resolveCollisions } from './collisions';
 import type { Enemy, EnemyEnv } from './enemy';
 import { EXPLOSION_TICKS, PEEL_SEGMENTS } from './enemy';
-import { DOWN_TICKS, Player, START_LIVES } from './player';
+import { Player, START_SHIELD } from './player';
 import { SHIP_Y } from './ship';
 import type { Shot } from './shot';
 import { diveOrder, passiveLevel } from './test-levels';
@@ -14,7 +14,6 @@ import { Wave } from './wave';
 import { onlyShot } from './test-shots';
 
 const FIRE = { move: 0, fire: true } as const;
-const IDLE = { move: 0, fire: false } as const;
 const ENV: EnemyEnv = { diveSpeed: 60, targetX: null };
 
 function rect(x: number, y: number, width: number, height: number) {
@@ -257,7 +256,8 @@ describe('resolveCollisions ram', () => {
     const player = new Player();
     resolveCollisions(player, w);
     expect(enemy.state).toBe('exploding');
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('a returning enemy rams the ship', () => {
@@ -266,7 +266,8 @@ describe('resolveCollisions ram', () => {
     const player = new Player();
     resolveCollisions(player, w);
     expect(enemy.state).toBe('exploding');
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('an enemy in formation does not ram', () => {
@@ -318,24 +319,34 @@ describe('resolveCollisions ram', () => {
     const player = new Player();
     resolveCollisions(player, w);
     expect(enemy.state).toBe('exploding');
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('no ram while the ship is down or invulnerable', () => {
-    const down = new Player();
+    const down = new Player(undefined, 0);
     down.hit();
     const invulnerable = new Player();
     invulnerable.hit();
-    for (let t = 0; t < DOWN_TICKS; t++) invulnerable.update(TICK_SECONDS, IDLE);
     expect(invulnerable.state).toBe('invulnerable');
     for (const player of [down, invulnerable]) {
       const w = wave(['D']);
       const enemy = divingAt(w, 0, player.ship.x + 2, 205);
-      const state = player.state;
+      const { state, shield } = player;
       resolveCollisions(player, w);
       expect(enemy.state).toBe('diving');
       expect(player.state).toBe(state);
+      expect(player.shield).toBe(shield);
     }
+  });
+
+  it('a ram at shield 0 puts the ship down, the rammer explodes', () => {
+    const w = wave(['D']);
+    const enemy = divingAt(w, 0, 122, 205);
+    const player = new Player(undefined, 0);
+    resolveCollisions(player, w);
+    expect(enemy.state).toBe('exploding');
+    expect(player.state).toBe('down');
   });
 
   it('only the first of two overlapping divers rams', () => {
@@ -346,7 +357,8 @@ describe('resolveCollisions ram', () => {
     resolveCollisions(player, w);
     expect(first.state).toBe('exploding');
     expect(second.state).toBe('diving');
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('an enemy shot down this tick does not ram', () => {
@@ -366,7 +378,8 @@ describe('resolveCollisions ram', () => {
     divingAt(w, 0, 122, 205);
     const player = new Player();
     expect(resolveCollisions(player, w)).toEqual([{ kind: 'striker', inFlight: true }]);
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('reports a shot kill and a ram in one tick, shot first', () => {
@@ -383,7 +396,8 @@ describe('resolveCollisions ram', () => {
     ]);
     expect(shotDown.state).toBe('exploding');
     expect(rammer.state).toBe('exploding');
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 });
 
@@ -412,7 +426,8 @@ describe('resolveCollisions enemy shots', () => {
     const player = new Player();
     expect(resolveCollisions(player, w)).toEqual([]); // enemy shots kill no enemies
     expect(w.shots).toHaveLength(0);
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('touching edges do not hit', () => {
@@ -437,25 +452,35 @@ describe('resolveCollisions enemy shots', () => {
     p3.ship.x = 111;
     resolveCollisions(p3, inside);
     expect(inside.shots).toHaveLength(0);
-    expect(p3.state).toBe('down');
+    expect(p3.state).toBe('invulnerable');
+    expect(p3.shield).toBe(START_SHIELD - 1);
   });
 
   it('enemy shots pass through the ship while it is down or invulnerable', () => {
-    const down = new Player();
+    const down = new Player(undefined, 0);
     down.hit();
     const invulnerable = new Player();
     invulnerable.hit();
-    for (let t = 0; t < DOWN_TICKS; t++) invulnerable.update(TICK_SECONDS, IDLE);
     expect(invulnerable.state).toBe('invulnerable');
     for (const player of [down, invulnerable]) {
       const w = waveWithShots(1);
       w.shots[0]!.y = 205;
-      const { state, stateTicks } = player;
+      const { state, stateTicks, shield } = player;
       resolveCollisions(player, w);
       expect(w.shots).toHaveLength(1);
       expect(player.state).toBe(state);
       expect(player.stateTicks).toBe(stateTicks);
+      expect(player.shield).toBe(shield);
     }
+  });
+
+  it('an enemy shot at shield 0 puts the ship down', () => {
+    const w = waveWithShots(1);
+    w.shots[0]!.y = 205;
+    const player = new Player(undefined, 0);
+    resolveCollisions(player, w);
+    expect(w.shots).toHaveLength(0);
+    expect(player.state).toBe('down');
   });
 
   it('only the first overlapping shot hits; the second stays', () => {
@@ -467,7 +492,8 @@ describe('resolveCollisions enemy shots', () => {
     resolveCollisions(player, w);
     expect(w.shots).toHaveLength(1);
     expect(w.shots[0]).toBe(second);
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 
   it('a shot and a ram on the same tick hit the ship once; the rammer survives', () => {
@@ -480,7 +506,8 @@ describe('resolveCollisions enemy shots', () => {
     const player = new Player();
     resolveCollisions(player, w);
     expect(w.shots).toHaveLength(0);
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
     expect(enemy.state).toBe('diving');
   });
 
@@ -571,7 +598,8 @@ describe('resolveCollisions with two player shots', () => {
       { kind: 'striker', inFlight: true },
     ]);
     expect(player.shots).toEqual([]);
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 1);
   });
 });
 
@@ -670,17 +698,17 @@ describe('resolveBonusCollisions', () => {
       collected: null,
     });
     expect(player.state).toBe('active');
-    expect(player.lives).toBe(START_LIVES);
+    expect(player.shield).toBe(START_SHIELD);
     expect(field.asteroid!.state).toBe('flying');
   });
 
-  // The bonus rng () => 0 gives every capsule here the kind 'life'.
+  // The bonus rng () => 0 gives every capsule here the kind 'shield'.
   it('the active ship catches a capsule over it', () => {
     const player = new Player();
     const field = fieldWithCapsuleAt(SHIP_Y);
     expect(resolveBonusCollisions(player, field)).toEqual({
       asteroidBroken: false,
-      collected: 'life',
+      collected: 'shield',
     });
     expect(field.capsule).toBeNull();
   });
@@ -688,15 +716,14 @@ describe('resolveBonusCollisions', () => {
   it('the invulnerable ship catches it too', () => {
     const player = new Player();
     player.hit();
-    for (let i = 0; i < DOWN_TICKS; i++) player.update(TICK_SECONDS, IDLE);
     expect(player.state).toBe('invulnerable');
     const field = fieldWithCapsuleAt(SHIP_Y);
-    expect(resolveBonusCollisions(player, field).collected).toBe('life');
+    expect(resolveBonusCollisions(player, field).collected).toBe('shield');
     expect(field.capsule).toBeNull();
   });
 
   it('the ship that is down does not catch it', () => {
-    const player = new Player();
+    const player = new Player(undefined, 0);
     player.hit();
     expect(player.state).toBe('down');
     const field = fieldWithCapsuleAt(SHIP_Y);
@@ -713,7 +740,7 @@ describe('resolveBonusCollisions', () => {
     expect(touching.capsule).toBe(capsule);
 
     const overlapping = fieldWithCapsuleAt(SHIP_Y - CAPSULE_SIZE + 1);
-    expect(resolveBonusCollisions(player, overlapping).collected).toBe('life');
+    expect(resolveBonusCollisions(player, overlapping).collected).toBe('shield');
     expect(overlapping.capsule).toBeNull();
   });
 
@@ -723,7 +750,7 @@ describe('resolveBonusCollisions', () => {
     // The capsule drops at y = 202: 202 + 8 > SHIP_Y = 208.
     expect(resolveBonusCollisions(player, field)).toEqual({
       asteroidBroken: true,
-      collected: 'life',
+      collected: 'shield',
     });
     expect(field.capsule).toBeNull();
     expect(player.shots).toEqual([]);
