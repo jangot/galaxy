@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../config';
 import type { Rng } from '../engine/rng';
 import { createRng } from '../engine/rng';
+import type { Asteroid } from './asteroid';
 import { ASTEROID_SIZE, ASTEROID_SPAWN_OFFSET_MAX } from './asteroid';
 import { BONUS_KINDS } from './bonus';
 import {
@@ -45,6 +46,20 @@ const ONE_TICK = { minTicks: 1, maxTicks: 1 };
 
 function step(f: BonusField, spawning = true, n = 1): void {
   for (let i = 0; i < n; i++) f.update(TICK_SECONDS, spawning);
+}
+
+/** Retry delay of the degenerate window used below. */
+const D = 7;
+const D_TICKS = { minTicks: D, maxTicks: D };
+
+/** Steps the flying asteroid until it leaves below the screen; returns it. */
+function flyAway(f: BonusField, spawning = true): Asteroid {
+  const a = f.asteroid!;
+  expect(a.state).toBe('flying');
+  step(f, spawning, FLIGHT_TICKS);
+  expect(a.state).toBe('gone');
+  expect(f.asteroid).toBeNull();
+  return a;
 }
 
 describe('spawn window', () => {
@@ -98,8 +113,8 @@ describe('BonusField', () => {
     expect(high.calls()).toBe(1);
   });
 
-  it('spawns on the update where levelTicks reaches spawnTick, once per level', () => {
-    const { rng, calls } = queued(0, 0.75, 0, 0);
+  it('spawns on the update where levelTicks reaches spawnTick and flies until it leaves', () => {
+    const { rng, calls } = queued(0, 0.75, 0, 0, 0); // tick 300; dir, offset, bonus; retry delay 300
     const f = new BonusField(rng);
     f.startLevel();
     step(f, true, 299);
@@ -108,19 +123,23 @@ describe('BonusField', () => {
     expect(calls()).toBe(1);
 
     step(f);
-    const a = f.asteroid;
+    const a = f.asteroid!;
     expect(a).not.toBeNull();
-    expect(a!.y).toBe(-ASTEROID_SIZE);
-    expect(a!.state).toBe('flying');
+    expect(a.y).toBe(-ASTEROID_SIZE);
+    expect(a.state).toBe('flying');
     expect(f.spawnTick).toBeNull();
     expect(calls()).toBe(4);
 
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < FLIGHT_TICKS - 1; i++) {
       step(f);
-      expect(f.asteroid === null || f.asteroid === a).toBe(true);
+      expect(f.asteroid).toBe(a);
     }
-    expect(f.asteroid).toBeNull();
     expect(calls()).toBe(4);
+    step(f); // leaves: the retry delay is drawn
+    expect(f.asteroid).toBeNull();
+    expect(f.levelTicks).toBe(300 + FLIGHT_TICKS);
+    expect(calls()).toBe(5);
+    expect(f.spawnTick).not.toBeNull();
   });
 
   it('calls the rng in the order dir, offset, bonus on spawn', () => {
@@ -321,6 +340,154 @@ describe('BonusField', () => {
     expect(spawns[0]).not.toBeNull();
     expect(spawns[0]!.tick).toBe(spawns[0]!.spawnTick);
     expect(spawns[1]).toEqual(spawns[0]);
+  });
+});
+
+describe('BonusField retry', () => {
+  it('brings an unshot asteroid back D ticks after it leaves, with the same bonus', () => {
+    const f = new BonusField(counting(0.5).rng, D_TICKS);
+    f.startLevel();
+    step(f, true, D);
+    const a = flyAway(f);
+    const L = f.levelTicks;
+    expect(L).toBe(D + FLIGHT_TICKS);
+    expect(f.spawnTick).toBe(L + D);
+    expect(f.retryBonus).toBe(a.bonus);
+    step(f, true, D - 1);
+    expect(f.asteroid).toBeNull();
+    step(f);
+    const b = f.asteroid!;
+    expect(b).not.toBeNull();
+    expect(b).not.toBe(a);
+    expect(b.bonus).toBe(a.bonus);
+    expect(b.y).toBe(-ASTEROID_SIZE);
+    expect(b.state).toBe('flying');
+    expect(f.spawnTick).toBeNull();
+    expect(f.retryBonus).toBeNull();
+  });
+
+  it('draws the retry delay, then only dir and offset for the retry; the bonus is kept', () => {
+    // startLevel; spawn: dir -1, offset 0, bonus fastShot; retry delay; retry: dir 1, offset max
+    const { rng, calls } = queued(0, 0, 0, 0.5, 0, 0.75, ALMOST_ONE);
+    const f = new BonusField(rng, ONE_TICK);
+    f.startLevel();
+    step(f);
+    const a = f.asteroid!;
+    expect(a.dir).toBe(-1);
+    expect(a.x).toBe(SCREEN_WIDTH - ASTEROID_SIZE);
+    expect(a.bonus).toBe('fastShot');
+    expect(a.bonus).not.toBe(BONUS_KINDS[0]);
+    expect(calls()).toBe(4);
+    flyAway(f);
+    expect(calls()).toBe(5);
+    expect(f.retryBonus).toBe('fastShot');
+    step(f); // spawnTick = L + 1
+    const b = f.asteroid!;
+    expect(b).not.toBe(a);
+    expect(calls()).toBe(7); // dir, offset only; a bonus draw would throw on call #8
+    expect(b.dir).toBe(1);
+    expect(b.x).toBe(ASTEROID_SPAWN_OFFSET_MAX);
+    expect(b.bonus).toBe('fastShot');
+    step(f, true, 10);
+    expect(calls()).toBe(7);
+  });
+
+  it.each([
+    [0, ASTEROID_SPAWN_MIN_TICKS],
+    [ALMOST_ONE, ASTEROID_SPAWN_MAX_TICKS],
+  ])('draws the retry delay from the spawn window (rng %d -> %i ticks)', (v, delay) => {
+    const f = new BonusField(queued(0, 0, 0, 0, v).rng);
+    f.startLevel();
+    step(f, true, 300);
+    flyAway(f);
+    expect(f.levelTicks).toBe(300 + FLIGHT_TICKS);
+    expect(f.spawnTick).toBe(f.levelTicks + delay);
+  });
+
+  it('comes back again and again while unshot', () => {
+    const f = new BonusField(counting(0.5).rng, D_TICKS);
+    f.startLevel();
+    step(f, true, D);
+    const bonus = f.asteroid!.bonus;
+    for (let i = 0; i < 3; i++) {
+      const prev = flyAway(f);
+      expect(f.retryBonus).toBe(bonus);
+      step(f, true, D);
+      const next = f.asteroid!;
+      expect(next).not.toBeNull();
+      expect(next).not.toBe(prev);
+      expect(next.bonus).toBe(bonus);
+    }
+  });
+
+  it('does not bring back a shot-down asteroid', () => {
+    const { rng, calls } = counting();
+    const f = new BonusField(rng, ONE_TICK);
+    f.startLevel();
+    step(f);
+    expect(f.asteroid).not.toBeNull();
+    expect(f.hitAsteroid()).toBe(true);
+    expect(f.takeCapsule()).not.toBeNull();
+    const before = calls();
+    step(f, true, EXPLOSION_TICKS);
+    expect(f.asteroid).toBeNull();
+    expect(f.spawnTick).toBeNull();
+    expect(f.retryBonus).toBeNull();
+    step(f, true, 1000);
+    expect(f.asteroid).toBeNull();
+    expect(calls()).toBe(before);
+  });
+
+  it('holds the retry timer while not spawning', () => {
+    const f = new BonusField(counting().rng, D_TICKS);
+    f.startLevel();
+    step(f, true, D);
+    flyAway(f);
+    const L = f.levelTicks;
+    step(f, false, 100);
+    expect(f.levelTicks).toBe(L);
+    expect(f.spawnTick).toBe(L + D);
+    expect(f.asteroid).toBeNull();
+    step(f, true, D - 1);
+    expect(f.asteroid).toBeNull();
+    step(f);
+    expect(f.asteroid).not.toBeNull();
+  });
+
+  it('schedules the retry of an asteroid that leaves while not spawning', () => {
+    const { rng, calls } = counting();
+    const f = new BonusField(rng, D_TICKS);
+    f.startLevel();
+    step(f, true, D);
+    const before = calls();
+    const a = flyAway(f, false);
+    expect(f.levelTicks).toBe(D);
+    expect(f.spawnTick).toBe(D + D);
+    expect(f.retryBonus).toBe(a.bonus);
+    expect(calls()).toBe(before + 1);
+    step(f, true, D - 1);
+    expect(f.asteroid).toBeNull();
+    step(f);
+    expect(f.asteroid).not.toBeNull();
+    expect(f.asteroid!.bonus).toBe(a.bonus);
+  });
+
+  it('cancels a waiting retry on startLevel', () => {
+    const { rng, calls } = counting();
+    const f = new BonusField(rng, D_TICKS);
+    f.startLevel();
+    step(f, true, D);
+    flyAway(f);
+    const before = calls();
+    f.startLevel();
+    expect(calls()).toBe(before + 1);
+    expect(f.retryBonus).toBeNull();
+    expect(f.spawnTick).toBe(D);
+    expect(f.levelTicks).toBe(0);
+    step(f, true, D);
+    expect(f.asteroid).not.toBeNull();
+    // The bonus is drawn from the rng: a new asteroid of the level, not a retry.
+    expect(calls()).toBe(before + 4);
   });
 });
 

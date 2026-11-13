@@ -46,9 +46,11 @@ export interface BattleOptions {
  * life won while the last ship is down cancels it (the ship respawns).
  * Past the end of the level table levelConfig escalates the last level
  * (shorter dive timers, see levels.ts).
- * Optional bonus field (opts.bonuses, own rng): one asteroid per level, worth asteroidPoints
- * when shot down; it drops a capsule, and the ship catching it gets the bonus (applyBonus) or
- * BONUS_FALLBACK_POINTS instead of a useless one; a new level draws its spawn tick.
+ * Optional bonus field (opts.bonuses, own rng): one asteroid per level (an unshot one that
+ * leaves comes back with the same bonus after a delay from the spawn window, until shot down
+ * or the level changes), worth asteroidPoints when shot down; it drops a capsule, and the
+ * ship catching it gets the bonus (applyBonus) or BONUS_FALLBACK_POINTS instead of a useless
+ * one; a new level draws its spawn tick and cancels a waiting retry.
  * The rng is the battle's own generator, separate from the scene's (starfield) one.
  */
 export class Battle {
@@ -107,8 +109,8 @@ export class Battle {
 
   /**
    * Tick order: player -> wave (aims at the ship's center of this tick, null while the ship
-   * is down) -> bonus field (moves; counts the level tick and spawns only in playing) ->
-   * enemy collisions and scoring (playing only) -> bonus collisions, asteroid points and the
+   * is down) -> bonus field (moves; an asteroid that left unshot schedules its retry; counts
+   * the level tick and spawns, new asteroid or retry, only in playing) -> enemy collisions and scoring (playing only) -> bonus collisions, asteroid points and the
    * caught bonus (playing and cleared; enemies go first, so a shot that killed an enemy cannot
    * hit the asteroid) -> phase. Points of the tick: kills -> asteroid -> capsule bonus. In
    * over nothing collides; points use the level of this tick.

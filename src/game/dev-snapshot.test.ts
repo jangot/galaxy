@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { SCREEN_HEIGHT } from '../config';
 import { Input } from '../engine/input';
 import { createRng } from '../engine/rng';
+import { ASTEROID_SIZE } from './asteroid';
 import { GAME_OVER_DELAY_TICKS } from './battle';
 import { BONUS_KINDS } from './bonus';
 import { ASTEROID_SPAWN_MAX_TICKS, ASTEROID_SPAWN_MIN_TICKS } from './bonus-field';
@@ -57,6 +59,7 @@ describe('snapshotScene', () => {
     expect(b.bonuses!.capsule).toBeNull();
     expect(b.bonuses!.spawnTick).toBeGreaterThanOrEqual(ASTEROID_SPAWN_MIN_TICKS);
     expect(b.bonuses!.spawnTick).toBeLessThanOrEqual(ASTEROID_SPAWN_MAX_TICKS);
+    expect(b.bonuses!.retryBonus).toBeNull();
   });
 
   it('shows a hit: one life less, the ship down', () => {
@@ -113,6 +116,18 @@ describe('snapshotScene', () => {
     expect(BONUS_KINDS).toContain(asteroid!.bonus);
     expect(asteroid!.state).toBe('flying');
     expect([-1, 1]).toContain(asteroid!.dir);
+  });
+
+  it('shows the bonus of a waiting retry once an unshot asteroid leaves', () => {
+    const scene = sceneWithAsteroid();
+    const before = battleOf(scene).bonuses!;
+    expect(before.retryBonus).toBeNull();
+    step(scene, new Input(), SCREEN_HEIGHT + ASTEROID_SIZE);
+    const after = battleOf(scene).bonuses!;
+    expect(after.asteroid).toBeNull();
+    expect(after.retryBonus).toBe(before.asteroid!.bonus);
+    expect(after.spawnTick).toBeGreaterThanOrEqual(after.levelTicks + ASTEROID_SPAWN_MIN_TICKS);
+    expect(after.spawnTick).toBeLessThanOrEqual(after.levelTicks + ASTEROID_SPAWN_MAX_TICKS);
   });
 
   it('is plain JSON', () => {
