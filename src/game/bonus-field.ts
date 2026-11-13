@@ -25,16 +25,29 @@ export const ASTEROID_SPAWN_WINDOW: SpawnWindow = {
   maxTicks: ASTEROID_SPAWN_MAX_TICKS,
 };
 
+/** What waits to fly out: a new asteroid of the level or a retry of an unshot one. */
+interface PendingAsteroid {
+  /** Level tick ('playing' ticks) on which it may fly out (still waits for an empty field). */
+  readonly tick: number;
+  /** null - a new asteroid, the bonus is drawn at spawn; otherwise a retry with this bonus. */
+  readonly bonus: BonusKind | null;
+}
+
 /**
- * What bonus things are on the field: one asteroid per level at a random 'playing' tick; a
- * broken asteroid drops a capsule. At most one of them on the field: the next asteroid waits
- * for an empty field. Own rng; call order is fixed: startLevel - 1 call (spawn tick); spawn -
- * dir, offset, bonus. The capsule never calls the rng (its kind is the asteroid's bonus).
+ * What bonus things are on the field: one asteroid per level at a random 'playing' tick; an
+ * unshot one that leaves below the screen comes back with the same bonus after a fresh delay
+ * from the spawn window (counted in 'playing' ticks from the leaving update), again and again
+ * until it is shot down or the level changes. A broken asteroid drops a capsule. At most one
+ * of them on the field: the next asteroid (new or retry) waits for an empty field. One thing
+ * waits at a time (pending). Own rng; call order is fixed: startLevel - 1 call (spawn tick);
+ * new asteroid spawn - dir, offset, bonus; an unshot asteroid leaving while nothing waits -
+ * 1 call (retry delay); retry spawn - dir, offset. The capsule never calls the rng (its kind
+ * is the asteroid's bonus).
  */
 export class BonusField {
   private current: Asteroid | null = null;
   private dropped: Capsule | null = null;
-  private tick: number | null = null;
+  private pending: PendingAsteroid | null = null;
   private ticks = 0;
 
   /**
@@ -66,9 +79,17 @@ export class BonusField {
     return this.dropped;
   }
 
-  /** This level's spawn tick; null once spawned or before the first startLevel. For tests. */
+  /**
+   * Level tick of the next asteroid (new or retry); null when nothing waits (spawned already,
+   * hit down, or before the first startLevel). For tests and dev snapshots.
+   */
   get spawnTick(): number | null {
-    return this.tick;
+    return this.pending?.tick ?? null;
+  }
+
+  /** Bonus of the waiting retry; null when nothing waits or a new asteroid waits. For tests / QA. */
+  get retryBonus(): BonusKind | null {
+    return this.pending?.bonus ?? null;
   }
 
   /** Ticks of 'playing' counted in the current level. For tests. */
@@ -77,35 +98,51 @@ export class BonusField {
   }
 
   /**
-   * A new level begins: draws its spawn tick; an unspawned asteroid of the last level is lost.
-   * A flying one stays.
+   * A new level begins: draws its spawn tick (1 rng call). Whatever waited is dropped - an
+   * unspawned asteroid or a waiting retry of the last level (owner decision В4). A flying one
+   * stays.
    */
   startLevel(): void {
     this.ticks = 0;
-    this.tick = randomInt(this.rng, this.spawnWindow.minTicks, this.spawnWindow.maxTicks + 1);
+    this.pending = { tick: this.drawWindowTicks(), bonus: null };
   }
 
   /**
-   * Moves the asteroid and the capsule, drops a gone asteroid / an offscreen capsule; then,
-   * only if spawning, counts the level tick and spawns. A busy field (asteroid or capsule)
+   * Moves the asteroid and the capsule, drops a gone asteroid / an offscreen capsule. An
+   * asteroid that went gone straight from flying left unshot (a hit one passes through
+   * exploding); if nothing waits, it schedules its retry: spawnTick = levelTicks + a delay
+   * from the spawn window (1 rng call), in any phase. Then, only if spawning, counts the level
+   * tick (before scheduling, so the delay counts from this update and the retry never flies
+   * out in it) and spawns. Scheduling goes before the spawn check on purpose: when an old
+   * asteroid leaves in the very update a new one of the level flies out, pending is still
+   * busy with the new one, so no retry and no extra rng call (checked by 'delays the spawn
+   * while the field is busy with a flying asteroid'). A busy field (asteroid or capsule)
    * delays the spawn (spawnTick kept, checked every spawning update); since what left is
-   * dropped first, the new asteroid may appear in the very update the old thing leaves.
+   * dropped first, the next asteroid may appear in the very update the old thing leaves.
    * The new asteroid does not move on its spawn tick.
    */
   update(dt: number, spawning: boolean): void {
+    let escaped: BonusKind | null = null;
     if (this.current) {
+      const wasFlying = this.current.state === 'flying';
       this.current.update(dt);
-      if (this.current.state === 'gone') this.current = null;
+      if (this.current.state === 'gone') {
+        if (wasFlying) escaped = this.current.bonus;
+        this.current = null;
+      }
     }
     if (this.dropped) {
       this.dropped.update(dt);
       if (this.dropped.isOffscreen) this.dropped = null;
     }
+    if (spawning) this.ticks++;
+    if (escaped !== null && this.pending === null) {
+      this.pending = { tick: this.ticks + this.drawWindowTicks(), bonus: escaped };
+    }
     if (!spawning) return;
-    this.ticks++;
-    if (this.tick !== null && this.ticks >= this.tick && this.isEmpty) {
-      this.current = this.spawn();
-      this.tick = null;
+    if (this.pending !== null && this.ticks >= this.pending.tick && this.isEmpty) {
+      this.current = this.spawn(this.pending.bonus);
+      this.pending = null;
     }
   }
 
@@ -133,16 +170,21 @@ export class BonusField {
     return capsule?.kind ?? null;
   }
 
-  /** No asteroid (flying or exploding) and no capsule: a new asteroid may spawn. */
+  /** No asteroid (flying or exploding) and no capsule: the next asteroid may spawn. */
   private get isEmpty(): boolean {
     return this.current === null && this.dropped === null;
   }
 
-  /** rng order: dir, offset, bonus. */
-  private spawn(): Asteroid {
+  /** rng order: dir, offset, then bonus only when not given (a retry keeps its bonus, В3). */
+  private spawn(bonus: BonusKind | null): Asteroid {
     const dir = this.rng() < 0.5 ? -1 : 1;
     const offset = randomInt(this.rng, 0, ASTEROID_SPAWN_OFFSET_MAX + 1);
-    const bonus = BONUS_KINDS[randomInt(this.rng, 0, BONUS_KINDS.length)]!;
-    return new Asteroid(dir, offset, bonus);
+    const kind = bonus ?? BONUS_KINDS[randomInt(this.rng, 0, BONUS_KINDS.length)]!;
+    return new Asteroid(dir, offset, kind);
+  }
+
+  /** One rng call: a tick count in the spawn window, inclusive. Used by startLevel and the retry. */
+  private drawWindowTicks(): number {
+    return randomInt(this.rng, this.spawnWindow.minTicks, this.spawnWindow.maxTicks + 1);
   }
 }

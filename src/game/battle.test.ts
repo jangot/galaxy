@@ -678,6 +678,43 @@ describe('Battle asteroid', () => {
     expect(calls).toBe(2); // the constructor and the new level
   });
 
+  it('brings an unshot asteroid back after the delay; a level change cancels the wait', () => {
+    const flight = SCREEN_HEIGHT + ASTEROID_SIZE;
+    // rng = 0: retry delay = the window's low end.
+    const battle = bonusBattle();
+    const first = spawnAsteroid(battle); // update 300
+    run(battle, flight);
+    expect(first.state).toBe('gone');
+    const field = battle.bonuses!;
+    expect(field.asteroid).toBeNull();
+    expect(field.levelTicks).toBe(ASTEROID_SPAWN_MIN_TICKS + flight);
+    expect(field.spawnTick).toBe(field.levelTicks + ASTEROID_SPAWN_MIN_TICKS);
+    run(battle, ASTEROID_SPAWN_MIN_TICKS - 1);
+    expect(field.asteroid).toBeNull();
+    run(battle, 1);
+    expect(field.asteroid).not.toBeNull();
+    expect(field.asteroid).not.toBe(first);
+
+    let calls = 0;
+    const rng = () => {
+      calls++;
+      return 0;
+    };
+    const other = bonusBattle({ bonuses: { rng } });
+    spawnAsteroid(other);
+    run(other, flight);
+    const waiting = other.bonuses!;
+    expect(waiting.retryBonus).not.toBeNull();
+    clearWave(other); // the enemy dies while the retry waits
+    expect(other.level).toBe(2);
+    expect(other.phase).toBe('playing');
+    expect(waiting.asteroid).toBeNull();
+    expect(waiting.retryBonus).toBeNull();
+    expect(waiting.spawnTick).toBe(300);
+    expect(waiting.levelTicks).toBe(0);
+    expect(calls).toBe(6); // constructor 1 + spawn 3 + retry delay 1 + startLevel 1
+  });
+
   it('a flying asteroid survives the level change', () => {
     const battle = bonusBattle();
     const asteroid = spawnAsteroid(battle);

@@ -73,7 +73,10 @@ export interface BattleSnapshot {
       readonly stateTicks: number;
     } | null;
     readonly capsule: { readonly kind: BonusKind; readonly x: number; readonly y: number } | null;
+    /** Level tick of the next asteroid, new or retry (BonusField.spawnTick); null - nothing waits. */
     readonly spawnTick: number | null;
+    /** Bonus of the waiting retry of an unshot asteroid; null - no retry waits. */
+    readonly retryBonus: BonusKind | null;
     readonly levelTicks: number;
   } | null;
 }
@@ -128,6 +131,7 @@ export function snapshotBattle(battle: Battle): BattleSnapshot {
             : null,
           capsule: capsule ? { kind: capsule.kind, x: capsule.x, y: capsule.y } : null,
           spawnTick: bonuses.spawnTick,
+          retryBonus: bonuses.retryBonus,
           levelTicks: bonuses.levelTicks,
         }
       : null,
