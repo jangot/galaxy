@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT } from '../config';
 import { Input } from '../engine/input';
 import { createRng } from '../engine/rng';
+import { memoryStorage } from '../engine/storage';
 import { ASTEROID_SIZE } from './asteroid';
 import { GAME_OVER_DELAY_TICKS } from './battle';
 import { BONUS_KINDS } from './bonus';
 import { ASTEROID_SPAWN_MAX_TICKS, ASTEROID_SPAWN_MIN_TICKS } from './bonus-field';
 import { snapshotScene } from './dev-snapshot';
 import { EXPLOSION_TICKS } from './enemy';
+import { HIGH_SCORE_KEY, HighScoreStore } from './high-score';
+import { hudView } from './hud';
 import { START_SHIELD } from './player';
 import { SHIP_Y } from './ship';
 import { PlayScene } from './scenes/play-scene';
@@ -36,7 +39,37 @@ function sceneWithAsteroid(): PlayScene {
 describe('snapshotScene', () => {
   it('describes the title', () => {
     const s = snapshotScene(new TitleScene(createRng(1)), { tick: 42, paused: true });
-    expect(s).toEqual({ tick: 42, paused: true, scene: 'title', battle: null });
+    expect(s).toEqual({ tick: 42, paused: true, scene: 'title', battle: null, highScore: null });
+  });
+
+  it('shows no record in a fresh game', () => {
+    expect(snap(new PlayScene(createRng(1))).highScore).toEqual({ best: 0, newRecord: false });
+  });
+
+  it('shows the saved record, not beaten', () => {
+    const records = new HighScoreStore(memoryStorage({ [HIGH_SCORE_KEY]: '500' }));
+    const scene = new PlayScene(createRng(1), undefined, undefined, undefined, records);
+    expect(snap(scene).highScore).toEqual({ best: 500, newRecord: false });
+  });
+
+  it('shows the record as the HUD does after beating it and in over', () => {
+    // Ship at x = 50 shoots down the corner enemy on tick 42 (see play-scene.test).
+    const scene = new PlayScene(createRng(1), undefined, { levels: ONE_CORNER_ENEMY, shield: 0 });
+    scene.battle.player.ship.x = 50;
+    const input = new Input();
+    input.press('fire');
+    step(scene, input, 42);
+    expect(scene.battle.score).toBeGreaterThan(0);
+    const view = hudView(scene.battle, scene.hudRecord());
+    expect(view.newRecord).toBe(true);
+    expect(snap(scene).highScore).toEqual({ best: view.highScore, newRecord: view.newRecord });
+
+    input.release('fire');
+    scene.battle.player.hit();
+    step(scene, input, GAME_OVER_DELAY_TICKS);
+    expect(snap(scene).scene).toBe('over');
+    const over = hudView(scene.battle, scene.hudRecord());
+    expect(snap(scene).highScore).toEqual({ best: over.highScore, newRecord: over.newRecord });
   });
 
   it('describes a fresh battle', () => {

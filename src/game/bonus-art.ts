@@ -1,4 +1,4 @@
-import type { BonusKind } from './bonus';
+import type { BonusKind, PowerUpKind } from './bonus';
 import { parseSprite, type Sprite } from './sprite';
 
 /**
@@ -29,12 +29,21 @@ export const ASTEROID_SPRITE: Sprite = parseSprite(
 
 const CAPSULE_LETTER_COLOR = '#fff2c0'; // warm white, not the shot white
 
+/** Letter rows 1...5 of the capsule plates (4×5 letter L on fill F, frame B). */
+const FAST_SHOT_LETTER = ['BFFLLLFB', 'BFLFFFFB', 'BFFLLFFB', 'BFFFFLFB', 'BFLLLFFB'];
+const DOUBLE_SHOT_LETTER = ['BFLLLFFB', 'BFLFFLFB', 'BFLFFLFB', 'BFLFFLFB', 'BFLLLFFB'];
+
 /** Plate, 8×8: frame B, fill F, letter L (4×5) in rows 1...5. */
-function capsuleSprite(letterRows: readonly string[], fill: string, frame: string): Sprite {
+function capsuleSprite(
+  letterRows: readonly string[],
+  fill: string,
+  frame: string,
+  letter: string = CAPSULE_LETTER_COLOR,
+): Sprite {
   return parseSprite(['.BBBBBB.', ...letterRows, 'BFFFFFFB', '.BBBBBB.'], {
     B: frame,
     F: fill,
-    L: CAPSULE_LETTER_COLOR,
+    L: letter,
   });
 }
 
@@ -50,13 +59,23 @@ export const CAPSULE_SPRITES: Readonly<Record<BonusKind, Sprite>> = {
     '#7a1a14',
   ),
   fastShot: capsuleSprite(
-    ['BFFLLLFB', 'BFLFFFFB', 'BFFLLFFB', 'BFFFFLFB', 'BFLLLFFB'],
+    FAST_SHOT_LETTER,
     '#3a72d8', // blue plate
     '#142f7a',
   ),
   doubleShot: capsuleSprite(
-    ['BFLLLFFB', 'BFLFFLFB', 'BFLFFLFB', 'BFLFFLFB', 'BFLLLFFB'],
+    DOUBLE_SHOT_LETTER,
     '#3aa84a', // green plate
     '#145a1e',
   ),
+};
+
+/**
+ * Unlit HUD lamps (feature 009 В7): the same capsule and letter in a dark palette, shown in a
+ * power-up slot until the power-up is taken. No window black and no color of the lit sprite
+ * (bonus-art.test.ts). First pass, approved at acceptance.
+ */
+export const CAPSULE_OFF_SPRITES: Readonly<Record<PowerUpKind, Sprite>> = {
+  fastShot: capsuleSprite(FAST_SHOT_LETTER, '#1c2a54', '#0e1838', '#56689c'), // dim blue
+  doubleShot: capsuleSprite(DOUBLE_SHOT_LETTER, '#1c3a22', '#0e2412', '#56845e'), // dim green
 };

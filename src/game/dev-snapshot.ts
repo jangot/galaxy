@@ -3,6 +3,7 @@ import type { AsteroidState } from './asteroid';
 import type { Battle, BattlePhase } from './battle';
 import type { BonusKind } from './bonus';
 import type { EnemyState } from './enemy';
+import { hudView } from './hud';
 import type { EnemyKind } from './levels';
 import type { ShipState } from './player';
 import { PlayScene } from './scenes/play-scene';
@@ -23,6 +24,11 @@ export interface GalaxySnapshot {
   readonly scene: SnapshotSceneName;
   /** null on the title. */
   readonly battle: BattleSnapshot | null;
+  /**
+   * null on the title. Built via hudView(scene.battle, scene.hudRecord()): equals the screen.
+   * best = the HI value shown, newRecord = HI drawn in HUD_RECORD_COLOR.
+   */
+  readonly highScore: { readonly best: number; readonly newRecord: boolean } | null;
 }
 
 export interface ShotSnapshot {
@@ -145,7 +151,18 @@ export function snapshotScene(
   const base = { tick: meta.tick, paused: meta.paused };
   if (scene instanceof PlayScene) {
     const battle = snapshotBattle(scene.battle);
-    return { ...base, scene: battle.phase === 'over' ? 'over' : 'play', battle };
+    const view = hudView(scene.battle, scene.hudRecord());
+    return {
+      ...base,
+      scene: battle.phase === 'over' ? 'over' : 'play',
+      battle,
+      highScore: { best: view.highScore, newRecord: view.newRecord },
+    };
   }
-  return { ...base, scene: scene instanceof TitleScene ? 'title' : 'unknown', battle: null };
+  return {
+    ...base,
+    scene: scene instanceof TitleScene ? 'title' : 'unknown',
+    battle: null,
+    highScore: null,
+  };
 }
