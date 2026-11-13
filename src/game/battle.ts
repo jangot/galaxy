@@ -5,20 +5,20 @@ import { resolveBonusCollisions, resolveCollisions } from './collisions';
 import type { LevelConfig } from './levels';
 import { levelConfig } from './levels';
 import type { PlayerIntent } from './player';
-import { DOWN_TICKS, MAX_LIVES, Player, START_LIVES } from './player';
-import { asteroidPoints, BONUS_FALLBACK_POINTS, extraLivesEarned, killPoints } from './score';
+import { Player, START_SHIELD } from './player';
+import { asteroidPoints, BONUS_FALLBACK_POINTS, extraShieldsEarned, killPoints } from './score';
 import { SHIP_WIDTH } from './ship';
 import { Wave } from './wave';
 
 /**
  * playing: the wave is alive; cleared: the pause before the next level's wave;
- * over: the last ship is lost - terminal, the wave keeps flying, no collisions.
+ * over: the ship is lost (hit without a shield) - terminal, the wave keeps flying, no collisions.
  */
 export type BattlePhase = 'playing' | 'cleared' | 'over';
 /** Pause between a cleared wave and the next one, ticks (owner decision В8: 1.5 s, no caption). */
 export const LEVEL_PAUSE_TICKS = 90;
-/** From the last ship's hit to game over: the moment it would have respawned (В3: 1 s). */
-export const GAME_OVER_DELAY_TICKS = DOWN_TICKS;
+/** Ticks from the fatal hit (no shield) to over (feature 005, В3: 1 s); > EXPLOSION_TICKS. */
+export const GAME_OVER_DELAY_TICKS = 60;
 
 export interface BonusOptions {
   /** The bonus field's own generator: never shifts the wave's dive choices. */
@@ -30,8 +30,8 @@ export interface BattleOptions {
   readonly startLevel?: number;
   /** Level table; defaults to LEVELS. Tests inject small tables from test-levels.ts. */
   readonly levels?: readonly LevelConfig[];
-  /** Starting lives, default START_LIVES. Tests use 1 for a quick game over. Player validates it. */
-  readonly lives?: number;
+  /** Starting shield, default START_SHIELD; tests use 0 for a quick game over. Player validates it. */
+  readonly shield?: number;
   /** Asteroids and bonuses; absent = none (old tests, test tables). PlayScene always passes it. */
   readonly bonuses?: BonusOptions;
 }
@@ -39,11 +39,11 @@ export interface BattleOptions {
 /**
  * Battle aggregate: everything that happens on the play field, without input or canvas.
  * Holds the player, the current level and its enemy wave, the score (killPoints per kill,
- * see score.ts) and extra lives for score thresholds (extraLivesEarned, capped by MAX_LIVES),
- * and the phase:
+ * see score.ts) and a shield level for each score threshold (extraShieldsEarned, capped by
+ * MAX_SHIELD, none while down), and the phase:
  * playing -> (every enemy dead) -> cleared -> (LEVEL_PAUSE_TICKS) -> playing on the next level;
- * playing | cleared -> (last ship lost, GAME_OVER_DELAY_TICKS) -> over, terminal; an extra
- * life won while the last ship is down cancels it (the ship respawns).
+ * playing | cleared -> (ship lost, GAME_OVER_DELAY_TICKS) -> over, terminal; a threshold
+ * crossed while the ship is down does not cancel it (feature 008, В7).
  * Past the end of the level table levelConfig escalates the last level
  * (shorter dive timers, see levels.ts).
  * Optional bonus field (opts.bonuses, own rng): one asteroid per level (an unshot one that
@@ -67,7 +67,7 @@ export class Battle {
     private readonly rng: Rng,
     opts: BattleOptions = {},
   ) {
-    this.player = new Player(undefined, opts.lives ?? START_LIVES);
+    this.player = new Player(undefined, opts.shield ?? START_SHIELD);
     this.levels = opts.levels;
     this.currentLevel = opts.startLevel ?? 1;
     this.currentWave = this.createWave();
@@ -138,28 +138,28 @@ export class Battle {
   }
 
   /**
-   * The only place the score changes. Each extra-life threshold crossed by these points gives
-   * player.addLife() (over MAX_LIVES it is lost, the threshold still counts). Runs after
-   * resolveCollisions; within the tick the order is kills -> asteroid -> capsule bonus, so a
-   * ship lost this tick is charged first: at MAX_LIVES a ram that crosses a threshold goes
-   * 5 -> 4 -> 5.
+   * The only place the score changes. Each shield threshold crossed by these points gives
+   * player.addShield() (lost over MAX_SHIELD or while down; the threshold still counts). Runs
+   * after resolveCollisions; within the tick the order is kills -> asteroid -> capsule bonus,
+   * so this tick's hit is charged first: at MAX_SHIELD a ram that crosses a threshold goes
+   * 5 -> 4 -> 5, at shield 0 it is down and the game is over.
    */
   private addScore(points: number): void {
     const before = this.currentScore;
     this.currentScore += points;
-    for (let i = extraLivesEarned(before, this.currentScore); i > 0; i--) this.player.addLife();
+    for (let i = extraShieldsEarned(before, this.currentScore); i > 0; i--) this.player.addShield();
   }
 
   /**
-   * A caught capsule (owner decisions В6, В8): life - addLife() below MAX_LIVES; a power-up -
-   * turned on if it is off. Useless (L at MAX_LIVES, the power-up already on) -
+   * A caught capsule (feature 006 В6, В8; feature 008 В5): shield - addShield(); a power-up -
+   * turned on if it is off. Useless (L at MAX_SHIELD, the power-up already on) -
    * BONUS_FALLBACK_POINTS instead. Decided by the state at this moment: after the kills and
-   * the asteroid points of the tick (an extra life just won by them makes L useless).
+   * the asteroid points of the tick (a shield level just won by them can make L useless).
+   * addShield() is false only at the cap here: a down ship catches no capsule (collisions.ts).
    */
   private applyBonus(kind: BonusKind): void {
-    if (kind === 'life') {
-      if (this.player.lives < MAX_LIVES) this.player.addLife();
-      else this.addScore(BONUS_FALLBACK_POINTS);
+    if (kind === 'shield') {
+      if (!this.player.addShield()) this.addScore(BONUS_FALLBACK_POINTS);
       return;
     }
     if (this.player.powerUps[kind]) this.addScore(BONUS_FALLBACK_POINTS);
@@ -169,7 +169,7 @@ export class Battle {
   /**
    * Counts the tick, then checks in order (each transition sets phaseTicks = 0):
    * 1. playing | cleared -> over once the ship is lost and GAME_OVER_DELAY_TICKS have passed
-   *    since its last hit; checked first, so the level never changes after the loss;
+   *    since the fatal hit; checked first, so the level never changes after the loss;
    * 2. playing -> cleared once every enemy is dead (enemy shots still in flight are removed);
    * 3. cleared -> playing with the next level's wave (and the bonus field's next level) when phaseTicks reaches LEVEL_PAUSE_TICKS.
    * over is terminal. The new wave is drawn this tick at its start positions and first

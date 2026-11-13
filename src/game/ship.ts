@@ -5,7 +5,7 @@ import { SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH, Shot } from './shot';
 /** Ship size is derived from its sprite so the hitbox never drifts from the picture. */
 export const SHIP_WIDTH = SHIP_SPRITE.width;
 export const SHIP_HEIGHT = SHIP_SPRITE.height;
-/** Top edge of the ship; the strip below it stays empty (lives are shown in the top HUD). */
+/** Top edge of the ship; the strip above it (203..206) holds the shield arc, see SHIELD_OFFSET_Y. */
 export const SHIP_Y = 208;
 /** Horizontal speed in px/s. Must be a whole number of px per tick (ADR 002): 2 px/tick. */
 export const SHIP_SPEED = 120;
@@ -15,7 +15,7 @@ export type MoveDir = -1 | 0 | 1;
 
 const MAX_X = SCREEN_WIDTH - SHIP_WIDTH;
 
-/** Ship's start and respawn x: horizontally centered. */
+/** Ship's start x: horizontally centered. */
 export const SHIP_START_X = Math.floor((SCREEN_WIDTH - SHIP_WIDTH) / 2);
 
 /** Player ship. Position is the top-left corner in logical pixels. Moves horizontally only. */

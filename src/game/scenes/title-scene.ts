@@ -6,8 +6,8 @@ import type { BattleOptions } from '../battle';
 import { Starfield } from '../starfield';
 import { PlayScene } from './play-scene';
 
-/** How a new game starts: level and lives (dev builds pass ?level / ?lives). */
-export type GameStart = Pick<BattleOptions, 'startLevel' | 'lives'>;
+/** How a new game starts: level and shield (dev builds pass ?level / ?shield). */
+export type GameStart = Pick<BattleOptions, 'startLevel' | 'shield'>;
 
 /** Placeholder title screen: starfield + caption. Real menu comes in a separate task. */
 export class TitleScene implements Scene {
@@ -17,7 +17,7 @@ export class TitleScene implements Scene {
 
   constructor(
     private readonly rng: Rng,
-    /** undefined fields = level 1, START_LIVES. Kept across a restart after game over. */
+    /** undefined fields = level 1, START_SHIELD. Kept across a restart after game over. */
     private readonly start: GameStart = {},
     /** Continue the stars when coming back from a game; undefined = new ones from rng. */
     starfield?: Starfield,

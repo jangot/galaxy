@@ -42,28 +42,28 @@ export function asteroidPoints(level: number): number {
 }
 
 /**
- * Instead of a useless bonus (L at MAX_LIVES, a power-up already on): flat, no level bonus
- * (feature 006, В8). Goes through Battle.addScore, so extra-life thresholds apply.
+ * Instead of a useless bonus (L at MAX_SHIELD, a power-up already on): flat, no level bonus
+ * (feature 006, В8). Goes through Battle.addScore, so shield thresholds apply.
  */
 export const BONUS_FALLBACK_POINTS = 500;
 
-/** First extra-life threshold, points (owner decision В4). */
-export const EXTRA_LIFE_FIRST = 5000;
-/** Step between the next thresholds: 15000, 25000, ... (В4). */
-export const EXTRA_LIFE_EVERY = 10000;
+/** First shield threshold, points (feature 005 В4, feature 008 В6). */
+export const EXTRA_SHIELD_FIRST = 5000;
+/** Step between the next thresholds: 15000, 25000, ... */
+export const EXTRA_SHIELD_EVERY = 10000;
 
 /** Thresholds at or below the score: 0 below 5000, 1 for 5000..14999, 2 for 15000..24999, ... */
 function thresholdsReached(score: number): number {
-  return score < EXTRA_LIFE_FIRST
+  return score < EXTRA_SHIELD_FIRST
     ? 0
-    : Math.floor((score - EXTRA_LIFE_FIRST) / EXTRA_LIFE_EVERY) + 1;
+    : Math.floor((score - EXTRA_SHIELD_FIRST) / EXTRA_SHIELD_EVERY) + 1;
 }
 
 /**
- * How many extra-life thresholds (5000, 15000, 25000, ...) the score crossed from `before` to
- * `after`; reaching a threshold exactly counts. Pure, no lives cap (that is Player.addLife).
- * The score only grows, so the result is >= 0 on every real call.
+ * How many shield thresholds (5000, 15000, 25000, ...) the score crossed from `before` to
+ * `after`; reaching a threshold exactly counts. Pure, no shield cap (that is
+ * Player.addShield). The score only grows, so the result is >= 0 on every real call.
  */
-export function extraLivesEarned(before: number, after: number): number {
+export function extraShieldsEarned(before: number, after: number): number {
   return thresholdsReached(after) - thresholdsReached(before);
 }

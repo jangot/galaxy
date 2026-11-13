@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_DEV_PARAMS, parseDevParams } from './dev-params';
 
 const seedOf = (v: string): number | null => parseDevParams(`?seed=${v}`).seed;
-const livesOf = (v: string): number | undefined => parseDevParams(`?lives=${v}`).lives;
+const shieldOf = (v: string): number | undefined => parseDevParams(`?shield=${v}`).shield;
 
 describe('parseDevParams', () => {
   it('returns the defaults for an empty search', () => {
@@ -10,7 +10,7 @@ describe('parseDevParams', () => {
       seed: null,
       paused: false,
       startLevel: 1,
-      lives: undefined,
+      shield: undefined,
     });
   });
 
@@ -35,21 +35,27 @@ describe('parseDevParams', () => {
     expect(parseDevParams('?paused=').paused).toBe(false);
   });
 
-  it('parses lives in 1..MAX_LIVES', () => {
-    expect(livesOf('1')).toBe(1);
-    expect(livesOf('5')).toBe(5);
+  it('parses shield in 0..MAX_SHIELD', () => {
+    expect(shieldOf('0')).toBe(0);
+    expect(shieldOf('2')).toBe(2);
+    expect(shieldOf('5')).toBe(5);
   });
 
-  it.each(['0', '6', '-1', '2.5', 'x'])('ignores lives %j', (v) => {
-    expect(livesOf(v)).toBeUndefined();
+  it.each(['6', '-1', '2.5', 'x', ''])('ignores shield %j', (v) => {
+    expect(shieldOf(v)).toBeUndefined();
+  });
+
+  it('no longer reads ?lives', () => {
+    expect(parseDevParams('?lives=1').shield).toBeUndefined();
+    expect(parseDevParams('?lives=1')).toEqual(parseDevParams(''));
   });
 
   it('combines all parameters', () => {
-    expect(parseDevParams('?seed=7&paused=1&level=3&lives=5')).toEqual({
+    expect(parseDevParams('?seed=7&paused=1&level=3&shield=5')).toEqual({
       seed: 7,
       paused: true,
       startLevel: 3,
-      lives: 5,
+      shield: 5,
     });
   });
 
@@ -64,7 +70,7 @@ describe('NO_DEV_PARAMS', () => {
       seed: null,
       paused: false,
       startLevel: undefined,
-      lives: undefined,
+      shield: undefined,
     });
   });
 });

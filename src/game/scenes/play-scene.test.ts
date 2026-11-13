@@ -26,12 +26,12 @@ function newScene(): PlayScene {
   return new PlayScene(createRng(1), undefined, { levels: ONE_CORNER_ENEMY });
 }
 
-/** Quick game over: one life, a manual hit, then the delay. */
+/** Quick game over: no shield, a manual hit, then the delay. */
 function overScene(exit?: () => Scene): PlayScene {
   const scene = new PlayScene(
     createRng(1),
     undefined,
-    { levels: ONE_CORNER_ENEMY, lives: 1 },
+    { levels: ONE_CORNER_ENEMY, shield: 0 },
     exit,
   );
   scene.battle.player.hit();
@@ -203,7 +203,7 @@ describe('PlayScene', () => {
       const scene = new PlayScene(
         createRng(1),
         undefined,
-        { levels: ONE_CORNER_ENEMY, lives: 1 },
+        { levels: ONE_CORNER_ENEMY, shield: 0 },
         spy.exit,
       );
       scene.battle.player.hit();
@@ -308,6 +308,6 @@ describe('PlayScene bonuses', () => {
     const enemies = (b: Battle) => b.wave.enemies.map((e) => [e.x, e.y, e.state]);
     expect(enemies(scene.battle)).toEqual(enemies(refBattle));
     expect(scene.battle.player.state).toBe(refBattle.player.state);
-    expect(scene.battle.player.lives).toBe(refBattle.player.lives);
+    expect(scene.battle.player.shield).toBe(refBattle.player.shield);
   });
 });

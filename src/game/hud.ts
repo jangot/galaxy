@@ -2,13 +2,14 @@ import { SCREEN_WIDTH } from '../config';
 import type { Battle } from './battle';
 import type { PowerUpKind, PowerUps } from './bonus';
 import { CHAR_ADVANCE, GLYPH_HEIGHT, textWidth } from './font';
+import { MAX_SHIELD } from './player';
 
 /** Data shown by the HUD; a pure snapshot built from the battle each frame. */
 export interface HudView {
   readonly level: number;
   readonly score: number;
-  /** Total lives including the ship on the field. */
-  readonly lives: number;
+  /** Shield level 0..MAX_SHIELD, drawn as the shield gauge. */
+  readonly shield: number;
   /** Enabled power-ups; each one lights its own fixed slot until the game ends. */
   readonly powerUps: PowerUps;
 }
@@ -31,15 +32,19 @@ export const HUD_HEIGHT = 24;
 export const HUD_MARGIN_X = 8;
 /** Top of the label row (glyphs y = 4...10). */
 export const HUD_LABEL_Y = 4;
-/** Top of the value row (glyphs y = 14...20, icons y = 14...21). */
+/** Top of the value row (glyphs y = 14...20, icons and gauge zone y = 14...21). */
 export const HUD_VALUE_Y = 14;
 
-/** Size limit of the lives icon (both sides); the zone is sized by it, not by the art. */
-export const LIFE_ICON_MAX_SIZE = 8;
-/** Horizontal step between lives icons: icon <= 8 px plus a 2 px gap. */
-export const LIFE_ICON_STEP = 10;
-/** How many icons the lives zone holds; drawLives draws at most this many. */
-export const LIVES_ICON_SLOTS = 5;
+/** Size limit of a value-row icon (both sides); zones are sized by it, not by the art. */
+export const HUD_ICON_SIZE = 8;
+/** Horizontal step between value-row icons and shield segments: <= 8 px plus a 2 px gap. */
+export const HUD_ICON_STEP = 10;
+
+/** One shield gauge segment, a plain rectangle. */
+export const SHIELD_SEGMENT_WIDTH = 8;
+export const SHIELD_SEGMENT_HEIGHT = 4;
+/** Segment top: centered in the value row's icon height (14 + (8 - 4) / 2 = 16, rows 16...19). */
+export const SHIELD_SEGMENT_Y = HUD_VALUE_Y + (HUD_ICON_SIZE - SHIELD_SEGMENT_HEIGHT) / 2;
 
 /** Label row + value row: 14 + 7 - 4 = 17. */
 const TEXT_ZONE_HEIGHT = HUD_VALUE_Y + GLYPH_HEIGHT - HUD_LABEL_Y;
@@ -62,50 +67,55 @@ export const LEVEL_ZONE: HudZone = {
   height: TEXT_ZONE_HEIGHT,
 };
 
-const LIVES_ZONE_WIDTH = (LIVES_ICON_SLOTS - 1) * LIFE_ICON_STEP + LIFE_ICON_MAX_SIZE; // 48
+const SHIELD_ZONE_WIDTH = (MAX_SHIELD - 1) * HUD_ICON_STEP + SHIELD_SEGMENT_WIDTH; // 48
 
-/** x = 200...247, y = 14...21: value row only; icons fill it from the right edge. */
-export const LIVES_ZONE: HudZone = {
-  x: SCREEN_WIDTH - HUD_MARGIN_X - LIVES_ZONE_WIDTH,
+/** x = 200...247, y = 14...21: value row only; MAX_SHIELD segments left to right. */
+export const SHIELD_ZONE: HudZone = {
+  x: SCREEN_WIDTH - HUD_MARGIN_X - SHIELD_ZONE_WIDTH,
   y: HUD_VALUE_Y,
-  width: LIVES_ZONE_WIDTH,
-  height: LIFE_ICON_MAX_SIZE,
+  width: SHIELD_ZONE_WIDTH,
+  height: HUD_ICON_SIZE,
 };
+
+/** x of shield segment i (0-based, left to right): 200, 210, ..., 240. Filled when i < shield. */
+export function shieldSegmentX(i: number): number {
+  return SHIELD_ZONE.x + i * HUD_ICON_STEP;
+}
 
 /** Power-up slots left to right; every PowerUpKind has exactly one slot. */
 export const POWER_UP_SLOT_KINDS: readonly PowerUpKind[] = ['fastShot', 'doubleShot'];
 
-const POWER_UPS_ZONE_WIDTH = LIFE_ICON_STEP + LIFE_ICON_MAX_SIZE; // 18: two slots
+const POWER_UPS_ZONE_WIDTH = HUD_ICON_STEP + HUD_ICON_SIZE; // 18: two slots
 
 /**
- * x = 156...173, y = 14...21: value row between the level (ends at 147) and the lives
- * (start at 200). No label: the label row above stays empty.
+ * x = 156...173, y = 14...21: value row between the level (ends at 147) and the shield
+ * gauge (starts at 200). No label: the label row above stays empty.
  */
 export const POWER_UPS_ZONE: HudZone = {
   x: 156,
   y: HUD_VALUE_Y,
   width: POWER_UPS_ZONE_WIDTH,
-  height: LIFE_ICON_MAX_SIZE,
+  height: HUD_ICON_SIZE,
 };
 
 /** Fixed slot x per power-up: an icon never moves when the other one arrives. */
 export const POWER_UP_SLOT_X: Readonly<Record<PowerUpKind, number>> = {
   fastShot: POWER_UPS_ZONE.x,
-  doubleShot: POWER_UPS_ZONE.x + LIFE_ICON_STEP,
+  doubleShot: POWER_UPS_ZONE.x + HUD_ICON_STEP,
 };
 
 /** All section zones, for the overlap test; a new section adds its zone here. */
-export const HUD_ZONES: readonly HudZone[] = [SCORE_ZONE, LEVEL_ZONE, LIVES_ZONE, POWER_UPS_ZONE];
+export const HUD_ZONES: readonly HudZone[] = [SCORE_ZONE, LEVEL_ZONE, SHIELD_ZONE, POWER_UPS_ZONE];
 
 /**
- * Builds the HUD snapshot from the battle: level, score, lives and power-ups. The
+ * Builds the HUD snapshot from the battle: level, score, shield and power-ups. The
  * power-ups object is the player's immutable snapshot (grantPowerUp replaces it).
  */
 export function hudView(battle: Battle): HudView {
   return {
     level: battle.level,
     score: battle.score,
-    lives: battle.player.lives,
+    shield: battle.player.shield,
     powerUps: battle.player.powerUps,
   };
 }

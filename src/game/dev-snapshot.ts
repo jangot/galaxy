@@ -35,7 +35,7 @@ export interface BattleSnapshot {
   readonly phase: BattlePhase;
   readonly phaseTicks: number;
   readonly score: number;
-  readonly lives: number;
+  readonly shield: number;
   readonly player: {
     readonly x: number;
     readonly y: number;
@@ -90,7 +90,7 @@ export function snapshotBattle(battle: Battle): BattleSnapshot {
     phase: battle.phase,
     phaseTicks: battle.phaseTicks,
     score: battle.score,
-    lives: player.lives,
+    shield: player.shield,
     player: {
       x: player.ship.x,
       y: player.ship.y,

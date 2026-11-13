@@ -7,9 +7,9 @@ import {
   asteroidPoints,
   BONUS_FALLBACK_POINTS,
   ENEMY_POINTS,
-  EXTRA_LIFE_EVERY,
-  EXTRA_LIFE_FIRST,
-  extraLivesEarned,
+  EXTRA_SHIELD_EVERY,
+  EXTRA_SHIELD_FIRST,
+  extraShieldsEarned,
   killPoints,
   levelPoints,
 } from './score';
@@ -183,10 +183,10 @@ describe('BONUS_FALLBACK_POINTS', () => {
   });
 });
 
-describe('extra lives', () => {
+describe('shield thresholds', () => {
   it('has the owner thresholds В4', () => {
-    expect(EXTRA_LIFE_FIRST).toBe(5000);
-    expect(EXTRA_LIFE_EVERY).toBe(10000);
+    expect(EXTRA_SHIELD_FIRST).toBe(5000);
+    expect(EXTRA_SHIELD_EVERY).toBe(10000);
   });
 
   it.each([
@@ -198,7 +198,7 @@ describe('extra lives', () => {
     [24990, 25010, 1],
     [0, 25000, 3],
   ])('earns %i -> %i: %i', (before, after, expected) => {
-    expect(extraLivesEarned(before, after)).toBe(expected);
+    expect(extraShieldsEarned(before, after)).toBe(expected);
   });
 
   it.each([
@@ -208,6 +208,6 @@ describe('extra lives', () => {
     [15000, 2],
     [25000, 3],
   ])('counts the thresholds at or below %i: %i', (score, expected) => {
-    expect(extraLivesEarned(0, score)).toBe(expected);
+    expect(extraShieldsEarned(0, score)).toBe(expected);
   });
 });

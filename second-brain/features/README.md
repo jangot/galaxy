@@ -22,3 +22,4 @@
 | 005 | Жизни, счёт и Game Over              | готова         | [005-lives-score-game-over/](005-lives-score-game-over/README.md) |
 | 006 | Астероиды с бонусами                 | готова         | [006-asteroid-bonuses/](006-asteroid-bonuses/README.md)           |
 | 007 | Повторный пролёт несбитого астероида | спроектирована | [007-asteroid-retry/](007-asteroid-retry/README.md)               |
+| 008 | Щит корабля вместо запаса жизней     | готова         | [008-ship-shield/](008-ship-shield/README.md)                     |

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from '../../config';
 import { Input } from '../../engine/input';
 import { createRng } from '../../engine/rng';
-import { START_LIVES } from '../player';
+import { MAX_SHIELD, START_SHIELD } from '../player';
 import { Starfield } from '../starfield';
 import { PlayScene } from './play-scene';
 import { step } from './scene-test-utils';
@@ -19,7 +19,7 @@ function startGame(title: TitleScene, input: Input): PlayScene {
 
 /** Hit the ship whenever it can be hit until game over; the limit makes a hang fail. */
 function loseGame(game: PlayScene, input: Input): void {
-  // Expected about 420 ticks: 2 × (down 60 + invulnerable 120) + 60.
+  // Expected about 300 ticks: 2 × invulnerable 120 + 60.
   for (let i = 0; i < 600 && game.battle.phase !== 'over'; i++) {
     if (game.battle.player.canBeHit) game.battle.player.hit();
     expect(step(game, input)).toBe(game);
@@ -101,7 +101,7 @@ describe('TitleScene', () => {
     expect(next).not.toBe(game);
     expect(next.starfield).toBe(stars);
     expect(next.battle.level).toBe(1);
-    expect(next.battle.player.lives).toBe(START_LIVES);
+    expect(next.battle.player.shield).toBe(START_SHIELD);
     expect(next.battle.phase).toBe('playing');
     expect(next.battle.score).toBe(0);
   });
@@ -115,18 +115,21 @@ describe('TitleScene', () => {
     expect(next.battle.level).toBe(2);
   });
 
-  it('starts the game with the given lives and keeps them across a restart', () => {
+  it('starts the game with the given shield and keeps it across a restart', () => {
     const input = new Input();
-    const game = startGame(new TitleScene(createRng(1), { lives: 1 }), input);
-    expect(game.battle.player.lives).toBe(1);
+    const game = startGame(new TitleScene(createRng(1), { shield: 0 }), input);
+    expect(game.battle.player.shield).toBe(0);
     loseGame(game, input);
     const next = startGame(backToTitle(game, input), input);
-    expect(next.battle.player.lives).toBe(1);
+    expect(next.battle.player.shield).toBe(0);
   });
 
-  it('combines the start level and lives', () => {
-    const game = startGame(new TitleScene(createRng(1), { startLevel: 2, lives: 5 }), new Input());
+  it('combines the start level and shield', () => {
+    const game = startGame(
+      new TitleScene(createRng(1), { startLevel: 2, shield: MAX_SHIELD }),
+      new Input(),
+    );
     expect(game.battle.level).toBe(2);
-    expect(game.battle.player.lives).toBe(5);
+    expect(game.battle.player.shield).toBe(MAX_SHIELD);
   });
 });

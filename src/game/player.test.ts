@@ -3,15 +3,8 @@ import { TICK_SECONDS } from '../config';
 import { Input } from '../engine/input';
 import { NO_POWER_UPS } from './bonus';
 import type { PlayerIntent } from './player';
-import {
-  DOWN_TICKS,
-  INVULNERABLE_TICKS,
-  MAX_LIVES,
-  Player,
-  readIntent,
-  START_LIVES,
-} from './player';
-import { SHIP_SPEED, SHIP_START_X, SHIP_WIDTH, Ship } from './ship';
+import { INVULNERABLE_TICKS, MAX_SHIELD, Player, readIntent, START_SHIELD } from './player';
+import { SHIP_SPEED, SHIP_WIDTH, Ship } from './ship';
 import { FAST_SHOT_SPEED, SHOT_HEIGHT, SHOT_SPEED, SHOT_WIDTH, Shot } from './shot';
 import { onlyShot } from './test-shots';
 
@@ -42,8 +35,15 @@ function run(player: Player, n: number, intent: PlayerIntent = IDLE): void {
   for (let i = 0; i < n; i++) player.update(TICK_SECONDS, intent);
 }
 
-/** A player off center (x = 40) that has just been hit: respawn at SHIP_START_X is visible. */
+/** A player off center (x = 40) with no shield, just hit: down for good. */
 function downPlayer(): Player {
+  const player = new Player(new Ship(40), 0);
+  player.hit();
+  return player;
+}
+
+/** A player off center (x = 40) just hit with the default shield: invulnerable in place. */
+function shieldHitPlayer(): Player {
   const player = new Player(new Ship(40));
   player.hit();
   return player;
@@ -301,7 +301,6 @@ describe('Player power-ups', () => {
     player.grantPowerUp('doubleShot');
     const snapshot = player.powerUps;
     player.hit();
-    run(player, DOWN_TICKS);
     expect(player.state).toBe('invulnerable');
     expect(player.powerUps).toBe(snapshot);
     player.update(TICK_SECONDS, FIRE);
@@ -344,13 +343,15 @@ describe('Player power-ups', () => {
   });
 
   it('while down all shots in flight keep flying and no new ones launch', () => {
-    const player = doublePlayer();
+    const player = new Player(undefined, 0);
+    player.grantPowerUp('doubleShot');
     player.update(TICK_SECONDS, FIRE);
     player.update(TICK_SECONDS, FIRE);
     const [first, second] = player.shots;
     const y1 = first!.y;
     const y2 = second!.y;
     player.hit();
+    expect(player.state).toBe('down');
     player.update(TICK_SECONDS, FIRE);
     expect(player.shots).toEqual([first, second]);
     expect(first!.y).toBe(y1 - SHOT_STEP);
@@ -384,10 +385,11 @@ describe('Player ship state', () => {
   });
 
   it('keeps the shot on hit() and lets it fly while down until it leaves the screen', () => {
-    const player = new Player(new Ship(40));
+    const player = new Player(new Ship(40), 0);
     player.update(TICK_SECONDS, FIRE);
     const shot = requireShot(player);
     player.hit();
+    expect(player.state).toBe('down');
     expect(onlyShot(player)).toBe(shot);
     const y0 = shot.y;
     player.update(TICK_SECONDS, IDLE);
@@ -397,47 +399,49 @@ describe('Player ship state', () => {
     expect(onlyShot(player)).toBeNull();
   });
 
-  it('stays down for DOWN_TICKS - 1 updates', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS - 1);
-    expect(player.state).toBe('down');
-    expect(player.stateTicks).toBe(DOWN_TICKS - 1);
+  it('hit() with a shield: shield - 1, invulnerable in place', () => {
+    const player = shieldHitPlayer();
+    expect(player.state).toBe('invulnerable');
+    expect(player.stateTicks).toBe(0);
+    expect(player.shield).toBe(START_SHIELD - 1);
+    expect(player.canBeHit).toBe(false);
+    expect(player.canBeTargeted).toBe(true);
     expect(player.ship.x).toBe(40);
   });
 
-  it('respawns invulnerable at SHIP_START_X after DOWN_TICKS updates', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS);
+  it('keeps the shot in flight on a shield hit', () => {
+    const player = new Player(new Ship(40));
+    player.update(TICK_SECONDS, FIRE);
+    const shot = requireShot(player);
+    player.hit();
     expect(player.state).toBe('invulnerable');
-    expect(player.stateTicks).toBe(0);
-    expect(player.ship.x).toBe(SHIP_START_X);
-    expect(player.canBeHit).toBe(false);
-    expect(player.canBeTargeted).toBe(true);
+    expect(onlyShot(player)).toBe(shot);
+    const y0 = shot.y;
+    player.update(TICK_SECONDS, IDLE);
+    expect(onlyShot(player)).toBe(shot);
+    expect(shot.y).toBe(y0 - SHOT_STEP);
   });
 
-  it("applies the respawn tick's intent from SHIP_START_X", () => {
+  it('stays down for good, whatever the ticks', () => {
     const player = downPlayer();
-    run(player, DOWN_TICKS - 1);
-    player.update(TICK_SECONDS, RIGHT_FIRE);
-    expect(player.state).toBe('invulnerable');
-    expect(player.ship.x).toBe(SHIP_START_X + STEP);
-    const shot = requireShot(player);
-    expect({ x: shot.x, y: shot.y }).toEqual(muzzleOf(player.ship));
+    run(player, 5000, RIGHT_FIRE);
+    expect(player.state).toBe('down');
+    expect(player.stateTicks).toBe(5000);
+    expect(player.ship.x).toBe(40);
+    expect(onlyShot(player)).toBeNull();
   });
 
   it('moves and fires while invulnerable', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS);
+    const player = shieldHitPlayer();
     player.update(TICK_SECONDS, RIGHT);
-    expect(player.ship.x).toBe(SHIP_START_X + STEP);
+    expect(player.ship.x).toBe(40 + STEP);
     player.update(TICK_SECONDS, FIRE);
     expect(player.state).toBe('invulnerable');
     expect(onlyShot(player)).not.toBeNull();
   });
 
-  it('becomes active INVULNERABLE_TICKS after the respawn', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS);
+  it('becomes active INVULNERABLE_TICKS after a shield hit', () => {
+    const player = shieldHitPlayer();
     run(player, INVULNERABLE_TICKS - 1);
     expect(player.state).toBe('invulnerable');
     expect(player.stateTicks).toBe(INVULNERABLE_TICKS - 1);
@@ -453,138 +457,158 @@ describe('Player ship state', () => {
     player.hit();
     expect(player.state).toBe('down');
     expect(player.stateTicks).toBe(10);
-    run(player, DOWN_TICKS - 10);
-    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(0);
   });
 
   it('hit() while invulnerable does nothing', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS);
+    const player = shieldHitPlayer();
     run(player, 10);
     const x = player.ship.x;
     player.hit();
     expect(player.state).toBe('invulnerable');
     expect(player.stateTicks).toBe(10);
+    expect(player.shield).toBe(START_SHIELD - 1);
     expect(player.ship.x).toBe(x);
     run(player, INVULNERABLE_TICKS - 10);
     expect(player.state).toBe('active');
   });
 
   it('can be hit again once active', () => {
-    const player = downPlayer();
-    run(player, DOWN_TICKS + INVULNERABLE_TICKS);
+    const player = shieldHitPlayer();
+    run(player, INVULNERABLE_TICKS);
     expect(player.state).toBe('active');
     player.hit();
-    expect(player.state).toBe('down');
+    expect(player.state).toBe('invulnerable');
+    expect(player.shield).toBe(START_SHIELD - 2);
   });
 });
 
-describe('Player lives', () => {
-  it('starts with START_LIVES = 3 and is not lost', () => {
-    expect(START_LIVES).toBe(3);
+describe('Player shield', () => {
+  it('starts with START_SHIELD = 2 and is not lost', () => {
+    expect(START_SHIELD).toBe(2);
     const player = new Player();
-    expect(player.lives).toBe(START_LIVES);
+    expect(player.shield).toBe(START_SHIELD);
     expect(player.isLost).toBe(false);
   });
 
-  it('accepts the starting lives in the constructor', () => {
-    expect(new Player(new Ship(), MAX_LIVES).lives).toBe(MAX_LIVES);
-    expect(new Player(new Ship(), 1).lives).toBe(1);
+  it('accepts the starting shield in the constructor', () => {
+    expect(new Player(new Ship(), MAX_SHIELD).shield).toBe(MAX_SHIELD);
+    expect(new Player(new Ship(), 0).shield).toBe(0);
   });
 
-  it.each([0, -1, 1.5, NaN, MAX_LIVES + 1])('rejects %s lives with a RangeError', (lives) => {
-    expect(() => new Player(new Ship(), lives)).toThrow(RangeError);
+  it.each([-1, 1.5, NaN, MAX_SHIELD + 1])('rejects %s shield with a RangeError', (shield) => {
+    expect(() => new Player(new Ship(), shield)).toThrow(RangeError);
   });
 
-  it('grows the lives with addLife up to MAX_LIVES and not above', () => {
-    expect(MAX_LIVES).toBe(5);
-    const player = new Player(new Ship(), MAX_LIVES - 1);
-    player.addLife();
-    expect(player.lives).toBe(MAX_LIVES);
-    player.addLife();
-    expect(player.lives).toBe(MAX_LIVES);
+  it('addShield grows the shield up to MAX_SHIELD and returns false at the cap', () => {
+    expect(MAX_SHIELD).toBe(5);
+    const player = new Player(new Ship(), MAX_SHIELD - 1);
+    expect(player.addShield()).toBe(true);
+    expect(player.shield).toBe(MAX_SHIELD);
+    expect(player.addShield()).toBe(false);
+    expect(player.shield).toBe(MAX_SHIELD);
   });
 
-  it('keeps the state and stateTicks on addLife in active and invulnerable', () => {
+  it('keeps the state and stateTicks on addShield in active and invulnerable', () => {
     const player = new Player();
     run(player, 3);
-    player.addLife();
+    player.addShield();
     expect(player.state).toBe('active');
     expect(player.stateTicks).toBe(3);
     player.hit();
-    run(player, DOWN_TICKS + 5);
+    run(player, 5);
     expect(player.state).toBe('invulnerable');
     expect(player.stateTicks).toBe(5);
-    player.addLife();
+    player.addShield();
     expect(player.state).toBe('invulnerable');
     expect(player.stateTicks).toBe(5);
-    expect(player.lives).toBe(START_LIVES + 1); // 3 + 1 - 1 + 1
+    expect(player.shield).toBe(START_SHIELD + 1); // 2 + 1 - 1 + 1
   });
 
-  it('brings the respawn back with addLife in down at 0 lives, on the usual tick', () => {
-    const player = new Player(new Ship(), 1);
-    player.hit();
-    run(player, 10); // the extra life comes later than the hit, the timer is not restarted
-    player.addLife();
-    expect(player.lives).toBe(1);
-    expect(player.isLost).toBe(false);
+  it('addShield does nothing while down', () => {
+    const player = downPlayer();
+    run(player, 10);
+    expect(player.addShield()).toBe(false);
+    expect(player.shield).toBe(0);
+    expect(player.isLost).toBe(true);
     expect(player.state).toBe('down');
     expect(player.stateTicks).toBe(10);
-    run(player, DOWN_TICKS - 11);
-    expect(player.state).toBe('down');
-    run(player, 1);
-    expect(player.state).toBe('invulnerable');
-    expect(player.ship.x).toBe(SHIP_START_X);
-  });
-
-  it('takes a life on the hit() call itself', () => {
-    const player = new Player();
-    player.hit();
-    expect(player.lives).toBe(START_LIVES - 1);
+    run(player, 5000);
     expect(player.state).toBe('down');
   });
 
-  it('takes no life on hit() while down or invulnerable', () => {
+  it('takes a level on the hit() call itself', () => {
     const player = new Player();
     player.hit();
-    player.hit();
-    expect(player.lives).toBe(START_LIVES - 1);
-    run(player, DOWN_TICKS);
-    expect(player.state).toBe('invulnerable');
-    player.hit();
-    expect(player.lives).toBe(START_LIVES - 1);
+    expect(player.shield).toBe(START_SHIELD - 1);
     expect(player.state).toBe('invulnerable');
   });
 
-  it('respawns on tick DOWN_TICKS while lives are left, without changing them', () => {
+  it('takes no level on hit() while invulnerable or down', () => {
     const player = new Player();
     player.hit();
-    run(player, DOWN_TICKS - 1);
-    expect(player.state).toBe('down');
-    run(player, 1);
+    player.hit();
+    expect(player.shield).toBe(START_SHIELD - 1);
     expect(player.state).toBe('invulnerable');
-    expect(player.lives).toBe(START_LIVES - 1);
+    const down = downPlayer();
+    down.hit();
+    expect(down.shield).toBe(0);
+    expect(down.state).toBe('down');
+  });
+
+  it('a hit at shield 1 drops it to 0 and still gives invulnerable', () => {
+    const player = new Player(undefined, 1);
+    player.hit();
+    expect(player.shield).toBe(0);
+    expect(player.state).toBe('invulnerable');
     expect(player.isLost).toBe(false);
   });
 
-  it('stays down for good after the last life', () => {
-    const player = new Player(new Ship(40), 1);
+  it('survives START_SHIELD hits and is lost on the next one', () => {
+    const player = new Player();
+    for (let i = 0; i < START_SHIELD; i++) {
+      player.hit();
+      expect(player.state).toBe('invulnerable');
+      run(player, INVULNERABLE_TICKS);
+    }
+    expect(player.state).toBe('active');
+    expect(player.shield).toBe(0);
     player.hit();
-    expect(player.lives).toBe(0);
+    expect(player.state).toBe('down');
     expect(player.isLost).toBe(true);
-    run(player, DOWN_TICKS);
+  });
+
+  it('survives MAX_SHIELD hits from the max and is lost on the 6th', () => {
+    const player = new Player(undefined, MAX_SHIELD);
+    for (let i = 0; i < MAX_SHIELD; i++) {
+      player.hit();
+      expect(player.state).toBe('invulnerable');
+      run(player, INVULNERABLE_TICKS);
+    }
+    expect(player.state).toBe('active');
+    expect(player.shield).toBe(0);
+    player.hit();
+    expect(player.state).toBe('down');
+    expect(player.isLost).toBe(true);
+  });
+
+  it('stays down for good after the fatal hit', () => {
+    const player = new Player(new Ship(40), 0);
+    player.hit();
+    expect(player.shield).toBe(0);
+    expect(player.isLost).toBe(true);
     run(player, 1000, RIGHT_FIRE);
     expect(player.state).toBe('down');
     expect(player.canBeHit).toBe(false);
     expect(player.canBeTargeted).toBe(false);
     expect(player.ship.x).toBe(40);
     expect(onlyShot(player)).toBeNull();
-    expect(player.stateTicks).toBe(DOWN_TICKS + 1000);
-    expect(player.lives).toBe(0);
+    expect(player.stateTicks).toBe(1000);
+    expect(player.shield).toBe(0);
   });
 
-  it('lets the shot in flight fly on after the last life is lost', () => {
-    const player = new Player(new Ship(40), 1);
+  it('lets the shot in flight fly on after the fatal hit', () => {
+    const player = new Player(new Ship(40), 0);
     player.update(TICK_SECONDS, FIRE);
     const shot = requireShot(player);
     player.hit();

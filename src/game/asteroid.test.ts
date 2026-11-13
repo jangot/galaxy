@@ -44,7 +44,7 @@ describe('Asteroid constants', () => {
 
 describe('Asteroid', () => {
   it('starts above the top edge at its side', () => {
-    const a = new Asteroid(1, 0, 'life');
+    const a = new Asteroid(1, 0, 'shield');
     expect(a.x).toBe(0);
     expect(a.y).toBe(-ASTEROID_SIZE);
     expect(a.width).toBe(ASTEROID_SIZE);
@@ -52,9 +52,9 @@ describe('Asteroid', () => {
     expect(a.state).toBe('flying');
     expect(a.stateTicks).toBe(0);
     expect(a.dir).toBe(1);
-    expect(a.bonus).toBe('life');
+    expect(a.bonus).toBe('shield');
 
-    expect(new Asteroid(1, 37, 'life').x).toBe(37);
+    expect(new Asteroid(1, 37, 'shield').x).toBe(37);
     const right = new Asteroid(-1, 0, 'doubleShot');
     expect(right.x).toBe(SCREEN_WIDTH - ASTEROID_SIZE);
     expect(right.y).toBe(-ASTEROID_SIZE);
@@ -67,7 +67,7 @@ describe('Asteroid', () => {
     [1, 0.5],
     [-1, -0.5],
   ] as const)('steps 1 px down and %i/2 px sideways per tick', (dir, dx) => {
-    const a = new Asteroid(dir, 10, 'life');
+    const a = new Asteroid(dir, 10, 'shield');
     const x0 = a.x;
     run(a, 1);
     expect(a.x).toBe(x0 + dx);
@@ -81,7 +81,7 @@ describe('Asteroid', () => {
     [-1, 0],
     [-1, ASTEROID_SPAWN_OFFSET_MAX],
   ] as const)('stays on screen the whole fall: dir %i, offset %i', (dir, offset) => {
-    const a = new Asteroid(dir, offset, 'life');
+    const a = new Asteroid(dir, offset, 'shield');
     let updates = 0;
     while (a.state !== 'gone') {
       expect(a.x).toBeGreaterThanOrEqual(0);
@@ -99,7 +99,7 @@ describe('Asteroid', () => {
   });
 
   it('leaves below the bottom edge on update number SCREEN_HEIGHT + size', () => {
-    const a = new Asteroid(1, 50, 'life');
+    const a = new Asteroid(1, 50, 'shield');
     run(a, FLIGHT_TICKS - 1);
     expect(a.state).toBe('flying');
     run(a, 1);
@@ -126,7 +126,7 @@ describe('Asteroid', () => {
   });
 
   it('ignores hit() while exploding or gone', () => {
-    const a = new Asteroid(-1, 0, 'life');
+    const a = new Asteroid(-1, 0, 'shield');
     a.hit();
     run(a, 3);
     expect(a.hit()).toBe(false);
@@ -142,7 +142,7 @@ describe('Asteroid', () => {
   });
 
   it('does nothing on update once gone', () => {
-    const a = new Asteroid(1, 0, 'life');
+    const a = new Asteroid(1, 0, 'shield');
     run(a, FLIGHT_TICKS);
     expect(a.state).toBe('gone');
     const { x, y, stateTicks } = a;

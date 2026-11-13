@@ -1,4 +1,4 @@
-import { SHIP_SPRITE, SHOT_COLOR } from './art';
+import { SHIELD_OFFSET_Y, SHIELD_SPRITES, SHIP_SPRITE, SHOT_COLOR } from './art';
 import type { Asteroid } from './asteroid';
 import type { Battle } from './battle';
 import { ASTEROID_SPRITE, CAPSULE_SPRITES } from './bonus-art';
@@ -21,7 +21,8 @@ export const BLINK_TICKS = 4;
  * ship are drawn over them (they are harmless and pass behind them).
  * No background.
  * Dead enemies are skipped, exploding ones show an explosion frame.
- * The ship: active - sprite; down - explosion, then nothing; invulnerable - blinking sprite.
+ * The ship: active - sprite and the shield arc (SHIELD_SPRITES[shield], none at 0); down -
+ * explosion, then nothing; invulnerable - ship and arc blink together.
  * The player's shots are drawn in any ship state.
  */
 export function drawBattle(ctx: CanvasRenderingContext2D, battle: Battle): void {
@@ -59,7 +60,10 @@ function drawAsteroid(ctx: CanvasRenderingContext2D, asteroid: Asteroid): void {
   }
 }
 
-/** active: sprite; down: explosion for EXPLOSION_TICKS, then nothing; invulnerable: blinking sprite. */
+/**
+ * active: sprite and the shield arc; down: explosion for EXPLOSION_TICKS, then nothing
+ * (no arc: shield is 0); invulnerable: the sprite and the arc blink together.
+ */
 function drawShip(ctx: CanvasRenderingContext2D, player: Player): void {
   const x = Math.floor(player.ship.x);
   const y = Math.floor(player.ship.y);
@@ -70,6 +74,8 @@ function drawShip(ctx: CanvasRenderingContext2D, player: Player): void {
   }
   if (player.state === 'invulnerable' && Math.floor(ticks / BLINK_TICKS) % 2 !== 0) return;
   drawSprite(ctx, SHIP_SPRITE, x, y);
+  const arc = SHIELD_SPRITES[player.shield];
+  if (arc) drawSprite(ctx, arc, x, y + SHIELD_OFFSET_Y);
 }
 
 /** dead: nothing; exploding: the frame for stateTicks, centered in the enemy; else its sprite. */

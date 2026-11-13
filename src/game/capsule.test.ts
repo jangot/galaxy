@@ -5,8 +5,8 @@ import { isAllowedSpeed } from './levels';
 
 describe('Capsule', () => {
   it('keeps its kind and position, 8×8', () => {
-    const c = new Capsule('life', 10, 20);
-    expect(c.kind).toBe('life');
+    const c = new Capsule('shield', 10, 20);
+    expect(c.kind).toBe('shield');
     expect(c.x).toBe(10);
     expect(c.y).toBe(20);
     expect(CAPSULE_SIZE).toBe(8);
@@ -27,8 +27,8 @@ describe('Capsule', () => {
   });
 
   it('is offscreen once its top reaches the bottom edge', () => {
-    expect(new Capsule('life', 0, SCREEN_HEIGHT - 1).isOffscreen).toBe(false);
-    expect(new Capsule('life', 0, SCREEN_HEIGHT).isOffscreen).toBe(true);
+    expect(new Capsule('shield', 0, SCREEN_HEIGHT - 1).isOffscreen).toBe(false);
+    expect(new Capsule('shield', 0, SCREEN_HEIGHT).isOffscreen).toBe(true);
   });
 
   it('has an allowed speed of exactly 1 px a tick (ADR 002)', () => {

@@ -14,10 +14,10 @@ const ctx = setupScreen(canvas, SCREEN_WIDTH, SCREEN_HEIGHT);
 const input = new Input();
 input.attach(window);
 
-// Dev only: ?seed / ?paused / ?level / ?lives (second-brain/architecture/dev-hooks.md).
+// Dev only: ?seed / ?paused / ?level / ?shield (second-brain/architecture/dev-hooks.md).
 const params = import.meta.env.DEV ? parseDevParams(window.location.search) : NO_DEV_PARAMS;
 const rng = createRng(params.seed ?? Date.now());
-let scene: Scene = new TitleScene(rng, { startLevel: params.startLevel, lives: params.lives });
+let scene: Scene = new TitleScene(rng, { startLevel: params.startLevel, shield: params.shield });
 /** Simulation ticks since page load: from the loop and from __galaxy.step(). */
 let ticks = 0;
 
