@@ -69,3 +69,24 @@ export const SHIELD_GAUGE_EMPTY_COLOR = '#3c3c3c';
 export const HUD_LABEL_COLOR = '#ff5a3c';
 /** HUD value row color (digits). */
 export const HUD_VALUE_COLOR = '#ffffff';
+/**
+ * HUD HI value while this game beats the record (feature 009 В4). First pass: the same
+ * NES yellow as shield level 2; approved at acceptance.
+ */
+export const HUD_RECORD_COLOR = '#ffe14f';
+
+/**
+ * Ship panel colors (feature 009 В5), first pass, approved at acceptance. Pairwise distinct,
+ * distinct from the window, the empty gauge segment and the HUD text colors (art.test.ts).
+ */
+/** Plate: cool steel grey-blue; the red labels sit on it. */
+export const PANEL_PLATE_COLOR = '#545470';
+/** Light top edge, y = 0. */
+export const PANEL_EDGE_COLOR = '#a8a8c8';
+/** Dark bottom bevel, y = 22...23. */
+export const PANEL_BEVEL_COLOR = '#24243a';
+/** Corner rivets, 1 px. */
+export const PANEL_RIVET_COLOR = '#d0d0e0';
+
+/** Instrument windows behind the values. Not a PANEL_* color: tests compare those with it. */
+export const HUD_WINDOW_COLOR = '#000';

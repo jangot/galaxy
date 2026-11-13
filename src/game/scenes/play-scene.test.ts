@@ -3,11 +3,17 @@ import { SCREEN_HEIGHT, SCREEN_WIDTH, TICK_SECONDS } from '../../config';
 import { Input } from '../../engine/input';
 import { createRng } from '../../engine/rng';
 import type { Scene } from '../../engine/scene';
+import { memoryStorage } from '../../engine/storage';
+import { HUD_RECORD_COLOR } from '../art';
 import { Battle, GAME_OVER_DELAY_TICKS } from '../battle';
 import { BONUS_KINDS } from '../bonus';
 import { ASTEROID_SPAWN_MAX_TICKS, ASTEROID_SPAWN_MIN_TICKS } from '../bonus-field';
 import { recorder } from '../canvas-test-utils';
+import { snapshotBattle } from '../dev-snapshot';
 import { drawGameOver } from '../game-over-render';
+import { HIGH_SCORE_KEY, HighScoreStore } from '../high-score';
+import { HI_ZONE, HUD_VALUE_Y, hudView } from '../hud';
+import { drawHud } from '../hud-render';
 import { Player } from '../player';
 import { SHIP_SPEED, SHIP_WIDTH, SHIP_Y, Ship } from '../ship';
 import { SHOT_HEIGHT, SHOT_SPEED } from '../shot';
@@ -309,5 +315,122 @@ describe('PlayScene bonuses', () => {
     expect(enemies(scene.battle)).toEqual(enemies(refBattle));
     expect(scene.battle.player.state).toBe(refBattle.player.state);
     expect(scene.battle.player.shield).toBe(refBattle.player.shield);
+  });
+});
+
+/** Shoots down the corner enemy (see 'shoots down an enemy'): battle.score > 0 afterwards. */
+function scoringScene(records?: HighScoreStore): PlayScene {
+  const scene = new PlayScene(
+    createRng(1),
+    undefined,
+    { levels: ONE_CORNER_ENEMY },
+    undefined,
+    records,
+  );
+  scene.battle.player.ship.x = 50;
+  const input = new Input();
+  input.press('fire');
+  step(scene, input, 42);
+  expect(scene.battle.wave.enemies[0]!.state).toBe('exploding');
+  expect(scene.battle.score).toBeGreaterThan(0);
+  return scene;
+}
+
+/** Calls of a render that paint the HI value in HUD_RECORD_COLOR. */
+function recordColorCalls(scene: PlayScene): number {
+  const { ctx, calls } = recorder();
+  scene.render(ctx);
+  return calls.filter(
+    (c) =>
+      c.fillStyle === HUD_RECORD_COLOR &&
+      c.y >= HUD_VALUE_Y &&
+      c.x >= HI_ZONE.x &&
+      c.x + c.w <= HI_ZONE.x + HI_ZONE.width &&
+      c.y + c.h <= HI_ZONE.y + HI_ZONE.height,
+  ).length;
+}
+
+describe('PlayScene record', () => {
+  it('without records uses its own in-memory store', () => {
+    const a = newScene();
+    const b = newScene();
+    expect(a.records.best).toBe(0);
+    expect(a.records).not.toBe(b.records);
+  });
+
+  it('starts from the saved record', () => {
+    const records = new HighScoreStore(memoryStorage({ [HIGH_SCORE_KEY]: '500' }));
+    const scene = new PlayScene(createRng(1), undefined, undefined, undefined, records);
+    expect(scene.records).toBe(records);
+    expect(scene.hudRecord()).toEqual({ best: 500, atStart: 500 });
+  });
+
+  it('takes the record at start after refresh (another tab)', () => {
+    const storage = memoryStorage();
+    const records = new HighScoreStore(storage);
+    storage.setItem(HIGH_SCORE_KEY, '700');
+    const scene = new PlayScene(createRng(1), undefined, undefined, undefined, records);
+    expect(scene.hudRecord().atStart).toBe(700);
+    expect(scene.hudRecord().best).toBe(700);
+  });
+
+  it('writes a beaten record at once', () => {
+    const storage = memoryStorage();
+    const scene = scoringScene(new HighScoreStore(storage));
+    const score = scene.battle.score;
+    expect(storage.getItem(HIGH_SCORE_KEY)).toBe(String(score));
+    expect(scene.records.best).toBe(score);
+    expect(scene.hudRecord()).toEqual({ best: score, atStart: 0 });
+    expect(hudView(scene.battle, scene.hudRecord()).newRecord).toBe(true);
+  });
+
+  it('leaves a record above the score alone', () => {
+    const storage = memoryStorage({ [HIGH_SCORE_KEY]: '999999' });
+    const scene = scoringScene(new HighScoreStore(storage));
+    expect(storage.getItem(HIGH_SCORE_KEY)).toBe('999999');
+    const view = hudView(scene.battle, scene.hudRecord());
+    expect(view.newRecord).toBe(false);
+    expect(view.highScore).toBe(999999);
+  });
+
+  it('spends no scene rng', () => {
+    const rng = createRng(1);
+    const records = new HighScoreStore(memoryStorage({ [HIGH_SCORE_KEY]: '500' }));
+    new PlayScene(rng, undefined, undefined, undefined, records);
+    const ref = createRng(1);
+    new Starfield(SCREEN_WIDTH, SCREEN_HEIGHT, ref);
+    ref();
+    expect(rng()).toBe(ref());
+  });
+
+  it('does not change the battle', () => {
+    const records = new HighScoreStore(memoryStorage({ [HIGH_SCORE_KEY]: '999999' }));
+    const a = new PlayScene(createRng(1), undefined, undefined, undefined, records);
+    const b = new PlayScene(createRng(1));
+    const input = new Input();
+    for (let i = 0; i < 300; i++) {
+      if (i % 20 === 0) input.press('fire');
+      if (i % 20 === 10) input.release('fire');
+      a.update(TICK_SECONDS, input);
+      b.update(TICK_SECONDS, input);
+      input.endTick();
+    }
+    expect(snapshotBattle(a.battle)).toEqual(snapshotBattle(b.battle));
+  });
+
+  it('renders the HI value in the record color only after beating the record', () => {
+    expect(recordColorCalls(scoringScene())).toBeGreaterThan(0);
+    expect(recordColorCalls(newScene())).toBe(0);
+  });
+});
+
+describe('PlayScene HUD', () => {
+  it('draws the HUD panel last while playing, over the battle', () => {
+    const scene = newScene();
+    const hud = recorder();
+    drawHud(hud.ctx, hudView(scene.battle, scene.hudRecord()));
+    const { ctx, calls } = recorder();
+    scene.render(ctx);
+    expect(calls.slice(-hud.calls.length)).toEqual(hud.calls);
   });
 });

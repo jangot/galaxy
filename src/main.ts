@@ -4,7 +4,9 @@ import { GameLoop } from './engine/loop';
 import { createRng } from './engine/rng';
 import type { Scene } from './engine/scene';
 import { setupScreen } from './engine/screen';
+import { safeStorage } from './engine/storage';
 import { NO_DEV_PARAMS, parseDevParams } from './game/dev-params';
+import { HighScoreStore } from './game/high-score';
 import { TitleScene } from './game/scenes/title-scene';
 
 const canvas = document.getElementById('screen');
@@ -17,7 +19,14 @@ input.attach(window);
 // Dev only: ?seed / ?paused / ?level / ?shield (second-brain/architecture/dev-hooks.md).
 const params = import.meta.env.DEV ? parseDevParams(window.location.search) : NO_DEV_PARAMS;
 const rng = createRng(params.seed ?? Date.now());
-let scene: Scene = new TitleScene(rng, { startLevel: params.startLevel, shield: params.shield });
+/** One record store for the session: survives restarts; localStorage keeps it across reloads. */
+const records = new HighScoreStore(safeStorage(() => window.localStorage));
+let scene: Scene = new TitleScene(
+  rng,
+  { startLevel: params.startLevel, shield: params.shield },
+  undefined,
+  records,
+);
 /** Simulation ticks since page load: from the loop and from __galaxy.step(). */
 let ticks = 0;
 

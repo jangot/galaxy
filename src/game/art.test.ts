@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { SHIELD_COLORS, SHIELD_GAUGE_EMPTY_COLOR, SHIELD_OFFSET_Y, SHIELD_SPRITES } from './art';
+import {
+  HUD_LABEL_COLOR,
+  HUD_RECORD_COLOR,
+  HUD_VALUE_COLOR,
+  HUD_WINDOW_COLOR,
+  PANEL_BEVEL_COLOR,
+  PANEL_EDGE_COLOR,
+  PANEL_PLATE_COLOR,
+  PANEL_RIVET_COLOR,
+  SHIELD_COLORS,
+  SHIELD_GAUGE_EMPTY_COLOR,
+  SHIELD_OFFSET_Y,
+  SHIELD_SPRITES,
+} from './art';
 import { MAX_SHIELD, START_SHIELD } from './player';
 import { SHIP_WIDTH } from './ship';
 
@@ -45,5 +58,29 @@ describe('shield arc data', () => {
 
   it('the start shield is drawn (START_SHIELD has an arc)', () => {
     expect(SHIELD_SPRITES[START_SHIELD]).not.toBeNull();
+  });
+});
+
+describe('HUD colors', () => {
+  it('the record color differs from the value and label colors', () => {
+    expect(HUD_RECORD_COLOR).not.toBe(HUD_VALUE_COLOR);
+    expect(HUD_RECORD_COLOR).not.toBe(HUD_LABEL_COLOR);
+  });
+
+  const PANEL_COLORS = [PANEL_PLATE_COLOR, PANEL_EDGE_COLOR, PANEL_BEVEL_COLOR, PANEL_RIVET_COLOR];
+
+  it('the panel colors, the window and the empty gauge segment are pairwise distinct', () => {
+    const colors = [...PANEL_COLORS, HUD_WINDOW_COLOR, SHIELD_GAUGE_EMPTY_COLOR];
+    expect(new Set(colors).size).toBe(colors.length);
+  });
+
+  it('the window is black', () => {
+    expect(HUD_WINDOW_COLOR).toBe('#000');
+  });
+
+  it('the panel colors differ from the HUD text colors (label, value, record)', () => {
+    for (const c of PANEL_COLORS) {
+      expect([HUD_LABEL_COLOR, HUD_VALUE_COLOR, HUD_RECORD_COLOR]).not.toContain(c);
+    }
   });
 });

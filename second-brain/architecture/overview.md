@@ -22,20 +22,38 @@
 - `rng.ts` — сидируемый PRNG (mulberry32), `randomInt()`.
 - `scene.ts` — интерфейс `Scene`: `update(dt, input)` может вернуть следующую сцену,
   `render(ctx)`.
+- `storage.ts` — `KeyValueStorage { getItem(key) → string | null, setItem(key, value) }`
+  (реализации никогда не бросают); `safeStorage(getBacking)` — обёртка над DOM `Storage`
+  (`StorageBacking = Pick<Storage, 'getItem' | 'setItem'>`): `getBacking()` зовётся на
+  каждый вызов внутри `try/catch` (само чтение `window.localStorage` может бросить
+  `SecurityError`), ошибка = нет значения / запись проигнорирована; `memoryStorage(initial?)` —
+  в памяти, для тестов. Что хранится — не знает.
 
 ## Игра
 
 - `starfield.ts` — фон из звёзд.
-- `scenes/title-scene.ts` — `TitleScene(rng, start?: GameStart, starfield?)` (`GameStart` =
+- `high-score.ts` — рекорд: `HIGH_SCORE_KEY = 'galaxy.highScore'`; `parseHighScore(raw)` —
+  только десятичные цифры в пределах безопасного целого, иначе (в т. ч. `null`, знак, точка,
+  экспонента, пробелы) 0; `HighScoreStore(storage: KeyValueStorage, key?)` — кэш в памяти,
+  `best` только растёт (сломанное хранилище — рекорд живёт до перезагрузки), `refresh()`
+  подхватывает больший рекорд из хранилища (другая вкладка) и не понижает, `submit(score)`
+  при `score > best` пишет `max(score, сохранённое)` и возвращает `true`, иначе — ни чтения, ни
+  записи. `window` не трогает (реальный `localStorage` подключается только в `main.ts`).
+- `scenes/title-scene.ts` — `TitleScene(rng, start?: GameStart, starfield?, records?)` (`GameStart` =
   `Pick<BattleOptions, 'startLevel' | 'shield'>`, по умолчанию `{}`), заглушка титульного
   экрана; переданные звёзды продолжаются (`rng` на них не тратится), без них — новые из `rng`;
   `readonly starfield` (для тестов). По `start` (Enter) возвращает `PlayScene`, передавая свой
   `rng`, тот же экземпляр `Starfield` — звёзды продолжаются без скачка — `{ startLevel, shield }`
   и фабрику `exit`, создающую новый `TitleScene` с теми же `rng`, `start`, `starfield`
   (возврат после Game Over). Фабрика живёт в титуле — `play-scene` не импортирует `title-scene`.
+  `records: HighScoreStore` (без него — свой стор над `memoryStorage()`, для тестов),
+  `readonly records`; тот же стор уходит в `PlayScene` и в фабрику `exit` — один рекорд на
+  всю сессию. Рекорд на заставке не показывается.
 - Точка входа `main.ts`: в dev-сборке (`import.meta.env.DEV`) параметры —
   `parseDevParams(location.search)` (`seed`, `paused`, `level`, `shield`), в прод-сборке —
-  `NO_DEV_PARAMS`; `createRng(seed ?? Date.now())`, `TitleScene(rng, { startLevel, shield })`.
+  `NO_DEV_PARAMS`; `createRng(seed ?? Date.now())`; один на сессию
+  `HighScoreStore(safeStorage(() => window.localStorage))`;
+  `TitleScene(rng, { startLevel, shield }, undefined, records)`.
   Тело тика — функция `tick()` (`update` → смена сцены → `input.endTick()` → счётчик `ticks`),
   её зовут и `GameLoop` (`{ paused }`), и `__galaxy.step`. В DEV — динамический
   `import('./game/dev-hooks')` и `window.__galaxy = createDevHooks(...)`; в прод-бандл не
@@ -45,7 +63,9 @@
   `0 … MAX_SHIELD` или `undefined`; `?lives` не читается), `NO_DEV_PARAMS`.
 - `dev-snapshot.ts` — `snapshotScene(scene, { tick, paused }): GalaxySnapshot` и
   `snapshotBattle(battle)`: plain-JSON копия по публичным геттерам (`scene`
-  `title`/`play`/`over`/`unknown`; бой — игрок, враги без `dead`, выстрелы, бонусное поле).
+  `title`/`play`/`over`/`unknown`; бой — игрок, враги без `dead`, выстрелы, бонусное поле;
+  `highScore: { best, newRecord } | null` — через `hudView(scene.battle, scene.hudRecord())`,
+  `null` на заставке).
 - `dev-hooks.ts` — `createDevHooks(deps)`: `step(n)`, `press/release` (имена из `ACTIONS`,
   иначе `TypeError`; зажатые восстанавливаются перед каждым тиком `step` — переживают `blur`),
   `pause/resume`, `state()`, `actions`; объявляет `Window.__galaxy`. `window` не трогает.
@@ -56,9 +76,14 @@
 - `art.ts` — данные пиксель-арта: `SHIP_SPRITE` 15×16 (разбирается при загрузке модуля —
   ошибка формата роняет импорт и ловится тестами), `SHOT_COLOR` (белый; выстрел —
   прямоугольник, не спрайт) и цвета панели `HUD_LABEL_COLOR` (красный, как `R` корабля) /
-  `HUD_VALUE_COLOR` (белый); `SHIELD_GAUGE_EMPTY_COLOR` (тёмно-серый `#3c3c3c`, пустой
+  `HUD_VALUE_COLOR` (белый), `HUD_RECORD_COLOR` (`#ffe14f`, жёлтый как щит 2: значение `HI`
+  при новом рекорде; утверждается на приёмке); `SHIELD_GAUGE_EMPTY_COLOR` (тёмно-серый `#3c3c3c`, пустой
   сегмент шкалы щита в HUD; утверждается на приёмке, отличие от `SHIELD_COLORS` проверяется
-  тестом). Щит над кораблём: `SHIELD_COLORS` (6 цветов, индекс = уровень
+  тестом). Панель корабля (фича 009, В5): `PANEL_PLATE_COLOR` (стальная плита `#545470`),
+  `PANEL_EDGE_COLOR` (светлая верхняя кромка), `PANEL_BEVEL_COLOR` (тёмный нижний скос),
+  `PANEL_RIVET_COLOR` (заклёпки) — утверждаются на приёмке; `HUD_WINDOW_COLOR = '#000'`
+  (окна приборов; не `PANEL_*`). Попарная различимость панели, окна и
+  `SHIELD_GAUGE_EMPTY_COLOR`, отличие панели от цветов текста — тест. Щит над кораблём: `SHIELD_COLORS` (6 цветов, индекс = уровень
   щита, 0 — `null`: 1 красный, 2 жёлтый, 3 жёлто-зелёный, 4 светло-зелёный, 5 зелёный),
   `SHIELD_SPRITES` (дуга 15×4 = ширина корабля в цвете уровня, выводится из `SHIELD_COLORS`,
   индекс 0 — `null`), `SHIELD_OFFSET_Y = -5` (дуга в строках 203…206, строка 207 пустая).
@@ -314,7 +339,9 @@ gone`; `hit()` — `true` только из `flying`; `stateTicks` — прав�
 - `bonus-art.ts` — `ASTEROID_SPRITE` 12×12; `CAPSULE_SPRITES: Record<BonusKind, Sprite>`
   8×8 — рамка, цветная плашка и буква 4×5 (`L` красная, `S` синяя, `D` зелёная плашка),
   рисованные вручную, не из шрифта; цвета стартовые (утверждаются на приёмке). Без цветов
-  выстрелов.
+  выстрелов. `CAPSULE_OFF_SPRITES: Record<PowerUpKind, Sprite>` — погасшие лампы HUD (та же
+  форма и буква в тёмной палитре, без `#000` и без цветов горящей капсулы; утверждаются на
+  приёмке); оба набора строит `capsuleSprite(letterRows, fill, frame, letter?)`.
 - `battle.ts` — `Battle(rng, opts?)`: агрегат боя без ввода и canvas; `rng` — свой
   генератор боя (хранится для новых волн). `BattleOptions { startLevel?, levels?, shield?,
 bonuses? }` (уровень по умолчанию 1, таблица — `LEVELS`, щит — `START_SHIELD`, проверяет
@@ -352,27 +379,39 @@ bonuses? }` (уровень по умолчанию 1, таблица — `LEVEL
   `EXPLOSION_TICKS` тиков, затем ничего; `invulnerable` — мигание `BLINK_TICKS = 4`
   (4 тика виден, 4 скрыт; виден в тике входа), дуга мигает вместе с кораблём. Выстрел игрока рисуется в любом
   состоянии корабля.
-- `hud.ts` — модель панели без canvas: `HudView { level, score, shield, powerUps }` (`shield` — уровень
-  щита `0…MAX_SHIELD`; `powerUps` — `battle.player.powerUps`, неизменяемый снимок), `hudView(battle)` (уровень — `battle.level`, щит —
-  `battle.player.shield`, счёт — `battle.score`), `formatScore`
+- `hud.ts` — модель панели без canvas: `HudView { level, score, highScore, newRecord, shield, powerUps }` (`shield` — уровень
+  щита `0…MAX_SHIELD`; `powerUps` — `battle.player.powerUps`, неизменяемый снимок),
+  `HudRecord { best, atStart }`, `hudView(battle, record)` (второй аргумент обязательный;
+  уровень — `battle.level`, щит — `battle.player.shield`, счёт — `battle.score`,
+  `highScore = max(record.best, score)`, `newRecord = score > record.atStart` — ничья не
+  рекорд; `hud.ts` не импортирует `high-score.ts`), `formatScore`
   (6 цифр с ведущими нулями, длиннее — целиком), `formatLevel`; раскладка:
-  `HUD_HEIGHT = 24`, `HUD_MARGIN_X = 8`, строки `HUD_LABEL_Y = 4` / `HUD_VALUE_Y = 14`,
-  `HudZone`, `SCORE_ZONE` (8, 4, 48×17), `LEVEL_ZONE` (108, 4, 40×17; номер — по центру
+  `HUD_HEIGHT = 24`, `HUD_MARGIN_X = 8`, строки `HUD_LABEL_Y = 3` / `HUD_VALUE_Y = 12`,
+  `HudZone`, `SCORE_ZONE` (8, 3, 48×16), `HI_LABEL = 'HI'`, `HI_ZONE` (64, 3, 48×16; 6 цифр
+  по левому краю, как счёт), `LEVEL_ZONE` (120, 3, 40×16 — на 12 px правее центра,
+  окончательная раскладка В1 фичи 009; номер — по центру
   под подписью: `levelValueX(text)` = `x + floor((40 − textWidth(text)) / 2)`, +16 для
-  1 цифры, +12 для 2; влезает до 5 цифр; счёт — по левому краю), `SHIELD_ZONE` (200, 14, 48×8; `MAX_SHIELD`
-  сегментов `SHIELD_SEGMENT_WIDTH × SHIELD_SEGMENT_HEIGHT` = 8×4 на `SHIELD_SEGMENT_Y = 16`,
+  1 цифры, +12 для 2; влезает до 5 цифр; счёт — по левому краю), `SHIELD_ZONE` (200, 12, 48×8; `MAX_SHIELD`
+  сегментов `SHIELD_SEGMENT_WIDTH × SHIELD_SEGMENT_HEIGHT` = 8×4 на `SHIELD_SEGMENT_Y = 14`,
   x = `shieldSegmentX(i)` = 200 + 10·i; ширина от `MAX_SHIELD`, импорт из `player.ts`),
   предел значка `HUD_ICON_SIZE = 8`, шаг `HUD_ICON_STEP = 10`,
-  `POWER_UPS_ZONE` (156, 14, 18×8; строка значений между уровнем и шкалой щита, без подписи),
+  `POWER_UPS_ZONE` (168, 12, 18×8; строка значений между уровнем и шкалой щита, без подписи),
   `POWER_UP_SLOT_KINDS` (порядок слотов `fastShot`, `doubleShot`), `POWER_UP_SLOT_X`
-  (фиксированные x: `fastShot` 156, `doubleShot` 166, шаг `HUD_ICON_STEP`),
+  (фиксированные x: `fastShot` 168, `doubleShot` 178, шаг `HUD_ICON_STEP`),
   `HUD_ZONES` — для теста непересечения. Новая секция = поле `HudView` + зона + `drawX`.
-- `hud-render.ts` — `drawHud(ctx, view)`: секции счёт → уровень → щит → улучшения, каждая рисует
+  Панель: `valueRow(zone)` (строка значений зоны: те же x/ширина, y = `HUD_VALUE_Y`,
+  высота `HUD_ICON_SIZE`), `PANEL_ZONE` (вся полоса 256×24), `PANEL_EDGE_HEIGHT = 1`,
+  `PANEL_BEVEL_HEIGHT = 2`, `HUD_WINDOW_PAD = 1`, `HUD_WINDOWS` — окна из `HUD_ZONES`
+  (`valueRow` + 1 px, y = 11…20; новая секция получает окно автоматически), `PANEL_RIVETS`
+  (x 2/253 × y 2/20). Цветов `hud.ts` не знает.
+- `hud-render.ts` — `drawHud(ctx, view)`: первой — `drawPanel(ctx)` (экспорт; плита, кромка,
+  скос, окна, заклёпки — 12 `fillRect`, статично, только в `PANEL_ZONE`), затем секции счёт → рекорд (`HI`) → уровень → щит → улучшения, каждая рисует
   только в своей зоне; подписи `HUD_LABEL_COLOR`, значения `HUD_VALUE_COLOR` через
-  `drawText`; `drawShield` рисует всегда `MAX_SHIELD` прямоугольников `fillRect`: `i < shield` —
-  `SHIELD_COLORS[shield]`, иначе `SHIELD_GAUGE_EMPTY_COLOR`; шкала не мигает; иконки улучшений —
-  `CAPSULE_SPRITES[kind]` (тот же спрайт, что капсула на поле) в фиксированном слоте, только
-  для включённых; фон не рисует.
+  `drawText`; значение `HI` — `HUD_RECORD_COLOR` при `newRecord` (без мигания), иначе
+  `HUD_VALUE_COLOR`; `drawShield` рисует всегда `MAX_SHIELD` прямоугольников `fillRect`: `i < shield` —
+  `SHIELD_COLORS[shield]`, иначе `SHIELD_GAUGE_EMPTY_COLOR`; шкала не мигает; лампы улучшений
+  в фиксированном слоте каждого вида: горящая — `CAPSULE_SPRITES[kind]` (тот же спрайт, что
+  капсула на поле), погасшая — `CAPSULE_OFF_SPRITES[kind]` (В7).
 - `game-over-render.ts` — `drawGameOver(ctx, phaseTicks, backdrop = GAME_OVER_BACKDROP)`:
   `GAME OVER` (`HUD_LABEL_COLOR`, y = `GAME_OVER_Y` = 112) и под ним мигающее `PRESS ENTER`
   (`HUD_VALUE_COLOR`, y = `PRESS_ENTER_Y` = 128) пиксельным шрифтом, по X по центру —
@@ -385,30 +424,37 @@ bonuses? }` (уровень по умолчанию 1, таблица — `LEVEL
   `fillRect` с текущим `fillStyle` (`FillCall`); используют `sprite.test.ts`,
   `battle-render.test.ts`, `font.test.ts`, `hud-render.test.ts`, `game-over-render.test.ts`,
   `scenes/play-scene.test.ts`.
-- `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?, exit?)`, `opts: BattleOptions`
+- `scenes/play-scene.ts` — `PlayScene(rng, starfield?, opts?, exit?, records?)`, `opts: BattleOptions`
   передаются в `Battle`, `bonuses` по умолчанию `{ rng: createRng((battleSeed ^
 BONUS_SEED_SALT) >>> 0) }` (`BONUS_SEED_SALT = 0x9e3779b9`, не экспортируется),
   переданный `opts.bonuses` не затирается (`??`); `exit: () => Scene` — куда ведёт Enter после Game Over.
   Игровая сцена: держит `readonly battle` и `readonly starfield` (открыты для тестов, тесты
-  ходят через `scene.battle.player`); `update` — звёзды → `battle.update(dt, readIntent(input))`
-  → в фазе `over` по `start` возвращает `exit()` (проверка после боя — Enter в тик перехода
+  ходят через `scene.battle.player`); `readonly records: HighScoreStore` (без него — свой
+  над `memoryStorage()`); в конструкторе `records.refresh()`, затем `recordAtStart = records.best`;
+  `hudRecord(): HudRecord` = `{ best: records.best, atStart: recordAtStart }` (для отрисовки и
+  dev-снимка). `update` — звёзды → `battle.update(dt, readIntent(input))` →
+  `records.submit(battle.score)` (рекорд пишется сразу при каждом росте, В3) → в фазе `over` по `start` возвращает `exit()` (проверка после боя — Enter в тик перехода
   в `over` уже срабатывает; без `exit` сцена остаётся). Слои: заливка → звёзды → `drawBattle` →
-  `drawHud(hudView(battle))` (без фона) → в фазе `over` `drawGameOver(ctx, battle.phaseTicks)`
+  `drawHud(hudView(battle, hudRecord()))` (непрозрачная панель поверх боя) → в фазе `over` `drawGameOver(ctx, battle.phaseTicks)`
   последним. Цикла `play ↔ title` нет: фабрику `exit` создаёт `TitleScene`.
   `readIntent` остаётся в сцене — `Battle` ввод не знает. `Starfield` принимает снаружи
   или создаёт из `rng`. `Battle` создаётся в конструкторе с отдельным `Rng`: сначала
   звёзды, потом seed боя `battleSeed = Math.floor(rng() * 2 ** 32)`, `createRng(battleSeed)` —
   фон не влияет на бой. Это единственный вызов `rng` сцены после звёзд (seed бонусов
   производный), поэтому звёзды (с перезапусками) и бой для данного seed — как до фичи 006.
+  Рекорд `rng` не тратит и на бой не влияет.
 - `scenes/scene-test-utils.ts` — только для тестов: `step(scene, input, n)` прогоняет
   тики как `main.ts` (`update` → смена сцены → `input.endTick()`). Тесты сцен вызывают
   `update` только через него.
 
 Граф импортов (без тестов):
 
-- `title-scene → {config, starfield, play-scene}` (`Input`, `Rng`, `Scene`, `BattleOptions` — type);
-- `play-scene → {config, engine/rng, battle, battle-render, game-over-render, hud,
-hud-render, player, starfield}` (`Input`, `Scene`, `BattleOptions` — type);
+- `title-scene → {config, engine/storage, high-score, starfield, play-scene}` (`Input`, `Rng`,
+  `Scene`, `BattleOptions` — type);
+- `play-scene → {config, engine/rng, engine/storage, battle, battle-render, game-over-render,
+high-score, hud, hud-render, player, starfield}` (`Input`, `Scene`, `BattleOptions`,
+  `HudRecord` — type);
+- `high-score` (`KeyValueStorage` — type); `engine/storage` — без импортов;
 - `game-over-render → {config, art, font}`; `hud → {config, font}` (`Battle`, `PowerUpKind`, `PowerUps` — type);
   `hud-render → {art, bonus-art, font, hud, sprite}` (`HudView`, `HudZone`, `PowerUps` — type);
 - `battle → {bonus-field, collisions, levels, player, score, ship, wave}` (`Rng`,
@@ -419,13 +465,13 @@ hud-render, player, starfield}` (`Input`, `Scene`, `BattleOptions` — type);
   (`Battle`, `Asteroid`, `Enemy`, `Player` — type);
 - `bonus-field → {engine/rng, asteroid, bonus, capsule}` (`Rng`, `BonusKind` — type);
   `asteroid → {config, enemy}` (`BonusKind` — type); `capsule → config` (`BonusKind` —
-  type); `bonus-art → sprite` (`BonusKind` — type);
+  type); `bonus-art → sprite` (`BonusKind`, `PowerUpKind` — type);
 - `player → {bonus, ship, shot}` (`Input`, `PowerUpKind`, `PowerUps`, `MoveDir`, `Shot`
   — type);
-- `main → {config, engine/*, game/dev-params, game/scenes/title-scene}` (+ динамический
+- `main → {config, engine/*, game/dev-params, game/high-score, game/scenes/title-scene}` (+ динамический
   `import()` `game/dev-hooks` в DEV);
 - `dev-params → {levels, player}`; `dev-hooks → {engine/input, dev-snapshot}` (`Action`,
-  `Input`, `Scene`, `GalaxySnapshot` — type); `dev-snapshot → {scenes/play-scene,
+  `Input`, `Scene`, `GalaxySnapshot` — type); `dev-snapshot → {hud, scenes/play-scene,
 scenes/title-scene}` (`Scene`, `Battle`, `BattlePhase`, `AsteroidState`, `BonusKind`,
   `EnemyState`, `EnemyKind`, `ShipState` — type);
 - `wave → {attack-director, enemy, enemy-shot, formation, levels}` (`Rng`, `EnemyEnv`,
